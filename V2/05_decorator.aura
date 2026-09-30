@@ -1,0 +1,122 @@
+// =============================================================================
+// Patrón de Diseño: Decorator v2 (Decorador de API Gateway con DynamicVar)
+// =============================================================================
+// Propósito:
+//   Añade responsabilidades y comportamientos adicionales a un objeto dinámicamente
+//   (auditoría, autenticación, telemetría) sin modificar el componente base.
+//
+// Características de Aura Lang Destacadas:
+//   - Variables dinámicas (`DynamicVar.new`) para trazabilidad e identidad sin taladrar firmas.
+//   - Sentencia `defer` determinista para medición de latencia y logs de salida.
+//   - Sentencia `errdefer` para alarmas de intrusión o reversiones ante errores.
+//   - Átomos internados (:admin, :operator, :guest) para control de acceso RBAC.
+//   - Duck Typing Estructural (interfaz HttpEndpointHandler).
+// =============================================================================
+
+// Variables dinámicas a nivel de fibra/hilo
+let TRACE_CORRELATION_ID = DynamicVar.new("trace-root-none");
+let CALLER_SECURITY_ROLE = DynamicVar.new(:guest);
+
+// 1. Interfaz del Componente Base (Duck Typing)
+export interface HttpEndpointHandler {
+  execute(path: String, payload: String): Result<String, String>;
+}
+
+// 2. Componente Concreto Base: Controlador de Negocio
+export fn createBaseController(): HttpEndpointHandler => {
+  {
+    execute: (path: String, payload: String): Result<String, String> => {
+      let trace = TRACE_CORRELATION_ID.get();
+      let role = CALLER_SECURITY_ROLE.get();
+      println(`    🎯 [CONTROLLER] Ejecutando lógica en '${path}' (Payload: "${payload}", Rol: ${role}, Trace: ${trace})`);
+      Ok(`HTTP 200: Operación exitosa en '${path}' procesada para rol ${role}`)
+    }
+  }
+};
+
+// 3. Decorador 1: Logging y Auditoría LIFO con `defer`
+export fn withAuditLogging(inner: HttpEndpointHandler): HttpEndpointHandler => {
+  {
+    execute: (path: String, payload: String): Result<String, String> => {
+      let trace = TRACE_CORRELATION_ID.get();
+      println(`  [LOGGING] >> [${trace}] Iniciando petición hacia: ${path}`);
+      defer println(`  [LOGGING] << [${trace}] Finalizada petición hacia: ${path}`);
+
+      inner.execute(path, payload)
+    }
+  }
+};
+
+// 4. Decorador 2: Control de Seguridad RBAC con `errdefer`
+export fn withSecurityGate(requiredRole: Atom, inner: HttpEndpointHandler): HttpEndpointHandler => {
+  {
+    execute: (path: String, payload: String): Result<String, String> => {
+      let currentRole = CALLER_SECURITY_ROLE.get();
+      let trace = TRACE_CORRELATION_ID.get();
+
+      // errdefer: si la autorización falla, alertar al subsistema de ciberseguridad
+      errdefer println(`  [ERRDEFER] 🚨 [${trace}] Alerta SOC: Acceso no autorizado denegado para rol '${currentRole}' hacia '${path}'`);
+
+      if (currentRole != requiredRole && requiredRole == :admin) {
+        return Err(`Acceso denegado. Se requiere rol de administrador (:admin), pero se presentó '${currentRole}'.`);
+      }
+
+      println(`  [SECURITY] ✓ [${trace}] Permiso verificado para rol '${currentRole}'.`);
+      inner.execute(path, payload)
+    }
+  }
+};
+
+// 5. Decorador 3: Métrica de Tráfico
+export fn withTrafficMetrics(counterName: String, inner: HttpEndpointHandler): HttpEndpointHandler => {
+  {
+    execute: (path: String, payload: String): Result<String, String> => {
+      let trace = TRACE_CORRELATION_ID.get();
+      println(`  [METRICS] 📊 [${trace}] Incrementando contador '${counterName}'`);
+      inner.execute(path, payload)
+    }
+  }
+};
+
+// 6. Demostración y Ejecución
+export fn main(): Unit => {
+  println("==================================================");
+  println("  PATRÓN DECORATOR v2 EN AURA LANG");
+  println("==================================================");
+
+  // Composición de decoradores:
+  // Base -> AuditLogging -> SecurityGate(:admin) -> TrafficMetrics
+  let baseHandler = createBaseController();
+  let securedHandler = withTrafficMetrics(
+    "api_v2_admin_requests",
+    withSecurityGate(
+      :admin,
+      withAuditLogging(baseHandler)
+    )
+  );
+
+  println("1. Caso Exitoso: Administrador invoca endpoint con Trace ID dinámico:\n");
+  TRACE_CORRELATION_ID.bind("req-trace-99120-prod", fn(): Unit => {
+    CALLER_SECURITY_ROLE.bind(:admin, fn(): Unit => {
+      let res = securedHandler.execute("/api/v2/system/reboot", "force=false");
+      match res {
+        Ok(msg) => println(`  Resultado Final: ${msg}`),
+        Err(e) => println(`  Resultado Final: ✕ ${e}`)
+      };
+    });
+  });
+
+  println("\n--------------------------------------------------");
+  println("2. Caso Fallido: Invitado (:guest) intenta acceder a endpoint restringido:\n");
+  TRACE_CORRELATION_ID.bind("req-trace-00411-attacker", fn(): Unit => {
+    CALLER_SECURITY_ROLE.bind(:guest, fn(): Unit => {
+      let res = securedHandler.execute("/api/v2/system/reboot", "force=true");
+      match res {
+        Ok(msg) => println(`  Resultado Final: ${msg}`),
+        Err(err) => println(`  Resultado Final: ✕ ${err}`)
+      };
+    });
+  });
+
+  println("\n✓ Decorator v2 ejecutado exitosamente.");
+};

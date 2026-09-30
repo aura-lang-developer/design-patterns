@@ -1,0 +1,148 @@
+// =============================================================================
+// Patrón de Diseño: Worker Pool v2 (Motor de Procesamiento CSP Masivo en Aura)
+// =============================================================================
+// Propósito:
+//   Gestiona un grupo fijo de fibras trabajadoras (Workers) que consumen tareas
+//   desde una cola compartida (Canal CSP), limitando el uso de recursos mientras
+//   procesan altos volúmenes de trabajo de manera concurrente.
+//
+// Características de Aura Lang Destacadas:
+//   - Concurrencia CSP nativa (Fibras `spawn`, Canales con búfer `Channel.make`).
+//   - Slices nativos estilo Go ([]Job, append, len, rebanado jobs[0:3]).
+//   - Átomos internados (:hash_crypto, :image_encode, :data_compress).
+//   - Sincronización libre de deadlocks con `WaitGroup.new()` y `await wg.wait()`.
+//   - Manejo determinista del ciclo de vida de canales con `Channel.close()`.
+// =============================================================================
+
+// 1. Estructura de la Tarea (Job) y su Resultado (JobResult)
+export type ComputeJob = {
+  jobId: Int,
+  kind: Atom,
+  payloadSizeKb: Int,
+  complexityFactor: Int,
+};
+
+export type JobOutcome = {
+  jobId: Int,
+  workerId: Int,
+  checksum: Int,
+  kind: Atom,
+};
+
+// 2. Función del Trabajador (Worker Fiber)
+fn runWorker(workerId: Int, inCh: Channel<ComputeJob>, outCh: Channel<JobOutcome>, wg: WaitGroup): Unit => {
+  spawn {
+    println(`  ⚙️ [Worker #${workerId}] Listo para procesar trabajos del canal...`);
+    let mut finished = false;
+    while (!finished) {
+      let optJob = <-inCh;
+      match optJob {
+        Some(job) => {
+          // Procesamiento computacional simulado
+          let factor = match job.kind {
+            :hash_crypto => 31,
+            :image_encode => 17,
+            _ => 7
+          };
+          let resultChecksum = (job.jobId * factor) + (job.payloadSizeKb * 2);
+
+          println(`     ⚙️ [Worker #${workerId}] Procesó Job #${job.jobId} [${job.kind}] -> Checksum: ${resultChecksum}`);
+
+          let outcome: JobOutcome = {
+            jobId: job.jobId,
+            workerId: workerId,
+            checksum: resultChecksum,
+            kind: job.kind,
+          };
+          outCh <- outcome;
+          ()
+        },
+        None => {
+          println(`  ⏹️ [Worker #${workerId}] Canal cerrado. Finalizando worker.`);
+          finished = true;
+        }
+      };
+    }
+    wg.done();
+  };
+};
+
+// 3. Demostración y Ejecución Concurrente
+export async fn main(): Task<Unit, String> => {
+  println("==================================================");
+  println("  PATRÓN WORKER POOL v2 EN AURA LANG");
+  println("==================================================");
+
+  let numWorkers = 3;
+  let jobQueue = Channel.make<ComputeJob>(20);
+  let resultsQueue = Channel.make<JobOutcome>(20);
+
+  let workerWg = WaitGroup.new();
+  workerWg.add(numWorkers);
+
+  println(`1. Desplegando Pool de ${numWorkers} Workers concurrentes:`);
+  let mut wId = 1;
+  while (wId <= numWorkers) {
+    runWorker(wId, jobQueue, resultsQueue, workerWg);
+    wId = wId + 1;
+  }
+
+  // 4. Preparación de Trabajos utilizando Slices estilo Golang
+  let allJobs: []ComputeJob = [
+    { jobId: 101, kind: :hash_crypto, payloadSizeKb: 64, complexityFactor: 5 },
+    { jobId: 102, kind: :image_encode, payloadSizeKb: 512, complexityFactor: 8 },
+    { jobId: 103, kind: :data_compress, payloadSizeKb: 1024, complexityFactor: 2 },
+    { jobId: 104, kind: :hash_crypto, payloadSizeKb: 128, complexityFactor: 4 },
+    { jobId: 105, kind: :image_encode, payloadSizeKb: 256, complexityFactor: 6 },
+    { jobId: 106, kind: :data_compress, payloadSizeKb: 2048, complexityFactor: 9 }
+  ];
+
+  println(`\n2. Productor encolando ${len(allJobs)} trabajos en lotes rebanados:`);
+
+  // Slicing de lotes: primer lote jobs[0:3], segundo lote jobs[3:]
+  let batch1 = allJobs[0:3];
+  let batch2 = allJobs[3:];
+  println(`  - Lote 1 rebanado: ${len(batch1)} jobs`);
+  println(`  - Lote 2 rebanado: ${len(batch2)} jobs`);
+
+  // Productor en Fiber independiente
+  spawn {
+    for j in batch1 {
+      jobQueue <- j;
+    }
+    for j in batch2 {
+      jobQueue <- j;
+    }
+    // Cerrar el canal de entrada tras enviar todo
+    Channel.close(jobQueue);
+    println("  ✓ Productor encoló todos los trabajos y cerró jobQueue.");
+  };
+
+  // 5. Supervisor en Fiber independiente para cerrar resultsQueue cuando terminen los workers
+  spawn {
+    await workerWg.wait();
+    println("\n3. [Supervisor] Todos los workers finalizaron. Cerrando resultsQueue.");
+    Channel.close(resultsQueue);
+  };
+
+  // 6. Recolector en el hilo principal
+  println("\n4. Recolectando resultados en tiempo real desde resultsQueue:\n");
+  let mut totalCollected = 0;
+  let mut stillReading = true;
+
+  while (stillReading) {
+    let resOpt = <-resultsQueue;
+    match resOpt {
+      Some(outcome) => {
+        totalCollected = totalCollected + 1;
+        println(`  ✓ Recibido resultado #${totalCollected}: Job #${outcome.jobId} [${outcome.kind}] resuelto por Worker #${outcome.workerId}`);
+      },
+      None => {
+        stillReading = false;
+      }
+    };
+  }
+
+  println(`\nTotal de trabajos procesados en paralelo: ${totalCollected}/${len(allJobs)}`);
+  println("✓ Worker Pool v2 ejecutado exitosamente.");
+};

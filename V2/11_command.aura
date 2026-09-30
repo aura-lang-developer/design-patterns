@@ -1,0 +1,178 @@
+// =============================================================================
+// Patrón de Diseño: Command v2 (Libro Contable Transaccional con Pila Undo/Redo)
+// =============================================================================
+// Propósito:
+//   Encapsula una petición como un objeto/variante (Comando), permitiendo parametrizar
+//   clientes con diferentes peticiones, encolar operaciones y soportar Undo/Redo reversible.
+//
+// Características de Aura Lang Destacadas:
+//   - Tipos Suma Algebraicos (ADTs) y Pattern Matching para modelar comandos.
+//   - Sentencia `errdefer` para garantizar atomicidad y rollback en fallos de saldo.
+//   - Slices nativos estilo Go ([]LedgerCommand, len, append, slicing stack[:len-1]).
+//   - Átomos internados (:credit, :debit, :transfer).
+//   - Duck Typing Estructural (interfaz LedgerController).
+// =============================================================================
+
+// 1. ADT: Comandos Contables Reversibles
+export type LedgerCommand =
+  | Deposit { accountId: String, amount: Int, txRef: String }
+  | Withdraw { accountId: String, amount: Int, txRef: String }
+  | Transfer { fromAcc: String, toAcc: String, amount: Int, txRef: String };
+
+// 2. Interfaz del Controlador del Libro Contable (Duck Typing)
+export interface LedgerController {
+  executeCommand(cmd: LedgerCommand): Result<String, String>;
+  undo(): Result<String, String>;
+  getBalance(accountId: String): Int;
+  getHistoryLength(): Int;
+}
+
+// 3. Implementación del Libro Contable con Soporte Transaccional
+export fn createLedger(): LedgerController => {
+  let balances: Map<String, Int> = Map.new();
+  let mut history: []LedgerCommand = [];
+
+  // Función auxiliar de saldo
+  let getBal = (acc: String): Int => {
+    if (balances.has(acc)) {
+      let b: Int = balances.get(acc);
+      return b;
+    }
+    return 0;
+  };
+
+  {
+    getBalance: (accountId: String): Int => getBal(accountId),
+
+    getHistoryLength: (): Int => len(history),
+
+    executeCommand: (cmd: LedgerCommand): Result<String, String> => {
+      errdefer println("  [ERRDEFER] ⚠️ Error transaccional detectado. Invariante del libro mayor preservado.");
+
+      match cmd {
+        Deposit { accountId, amount, txRef } => {
+          if (amount <= 0) {
+            return Err("El monto de depósito debe ser estrictamente positivo.");
+          }
+          let current = getBal(accountId);
+          balances.set(accountId, current + amount);
+          history = append(history, cmd);
+          Ok(`[DEPOSIT] +$${amount} en '${accountId}' (Ref: ${txRef}) -> Saldo: $${current + amount}`)
+        },
+        Withdraw { accountId, amount, txRef } => {
+          if (amount <= 0) {
+            return Err("El monto de retiro debe ser positivo.");
+          }
+          let current = getBal(accountId);
+          if (current < amount) {
+            return Err(`Fondos insuficientes en '${accountId}'. Saldo actual: $${current}, requerido: $${amount}.`);
+          }
+          balances.set(accountId, current - amount);
+          history = append(history, cmd);
+          Ok(`[WITHDRAW] -$${amount} de '${accountId}' (Ref: ${txRef}) -> Saldo: $${current - amount}`)
+        },
+        Transfer { fromAcc, toAcc, amount, txRef } => {
+          if (amount <= 0) {
+            return Err("El monto de transferencia debe ser positivo.");
+          }
+          let balFrom = getBal(fromAcc);
+          if (balFrom < amount) {
+            return Err(`Transferencia rechazada: saldo insuficiente en origen '${fromAcc}'.`);
+          }
+          let balTo = getBal(toAcc);
+          balances.set(fromAcc, balFrom - amount);
+          balances.set(toAcc, balTo + amount);
+          history = append(history, cmd);
+          Ok(`[TRANSFER] $${amount} de '${fromAcc}' a '${toAcc}' (Ref: ${txRef})`)
+        }
+      }
+    },
+
+    undo: (): Result<String, String> => {
+      let total = len(history);
+      if (total == 0) {
+        return Err("No hay comandos pendientes para deshacer en el historial.");
+      }
+
+      // Extraer el último comando aplicado (LIFO)
+      let lastCmd = history[total - 1];
+      // Reducir la pila usando slicing estilo Golang history[:total - 1]
+      history = history[:total - 1];
+
+      match lastCmd {
+        Deposit { accountId, amount, txRef } => {
+          let current = getBal(accountId);
+          balances.set(accountId, current - amount);
+          Ok(`[UNDO-DEPOSIT] Revertido depósito de $${amount} en '${accountId}' (Ref: ${txRef})`)
+        },
+        Withdraw { accountId, amount, txRef } => {
+          let current = getBal(accountId);
+          balances.set(accountId, current + amount);
+          Ok(`[UNDO-WITHDRAW] Reintegrado retiro de $${amount} en '${accountId}' (Ref: ${txRef})`)
+        },
+        Transfer { fromAcc, toAcc, amount, txRef } => {
+          let balFrom = getBal(fromAcc);
+          let balTo = getBal(toAcc);
+          balances.set(fromAcc, balFrom + amount);
+          balances.set(toAcc, balTo - amount);
+          Ok(`[UNDO-TRANSFER] Revertida transferencia de $${amount} entre '${fromAcc}' y '${toAcc}'`)
+        }
+      }
+    }
+  }
+};
+
+// 4. Demostración y Ejecución
+export fn main(): Unit => {
+  println("==================================================");
+  println("  PATRÓN COMMAND v2 EN AURA LANG");
+  println("==================================================");
+
+  let ledger = createLedger();
+
+  println("1. Ejecución Secuencial de Comandos Contables:\n");
+
+  let c1 = LedgerCommand.Deposit({ accountId: "acc-alice", amount: 1000, txRef: "TX-DEP-001" });
+  let c2 = LedgerCommand.Deposit({ accountId: "acc-bob", amount: 200, txRef: "TX-DEP-002" });
+  let c3 = LedgerCommand.Transfer({ fromAcc: "acc-alice", toAcc: "acc-bob", amount: 350, txRef: "TX-TRF-003" });
+
+  let cmds: []LedgerCommand = [c1, c2, c3];
+  for cmd in cmds {
+    match ledger.executeCommand(cmd) {
+      Ok(msg) => println(`  ✓ ${msg}`),
+      Err(err) => println(`  ✕ ${err}`)
+    };
+  }
+
+  println("\n2. Estado Actual de Saldos:");
+  println(`  - Saldo Alice: $${ledger.getBalance("acc-alice")}`);
+  println(`  - Saldo Bob:   $${ledger.getBalance("acc-bob")}`);
+  println(`  - Longitud de pila de comandos: ${ledger.getHistoryLength()}`);
+
+  println("\n3. Operación Inválida con errdefer (Sobregiro en Alice):");
+  let overdrawCmd = LedgerCommand.Withdraw({ accountId: "acc-alice", amount: 9999, txRef: "TX-FAIL-004" });
+  match ledger.executeCommand(overdrawCmd) {
+    Ok(_) => println("  ✕ No debió ejecutarse"),
+    Err(e) => println(`  ✓ Rechazado correctamente: "${e}"`)
+  };
+
+  println("\n4. Operación Undo: Deshacer Últimas Acciones (LIFO con Slices):");
+
+  // Deshacer Transferencia
+  match ledger.undo() {
+    Ok(msg) => println(`  ↩️ ${msg}`),
+    Err(e) => println(`  ✕ ${e}`)
+  };
+  println(`    -> Saldo Alice: $${ledger.getBalance("acc-alice")} (Revertido a 1000)`);
+  println(`    -> Saldo Bob:   $${ledger.getBalance("acc-bob")} (Revertido a 200)`);
+
+  // Deshacer Depósito de Bob
+  match ledger.undo() {
+    Ok(msg) => println(`  ↩️ ${msg}`),
+    Err(e) => println(`  ✕ ${e}`)
+  };
+  println(`    -> Saldo Bob: $${ledger.getBalance("acc-bob")} (Revertido a 0)`);
+  println(`    -> Longitud remanente en pila de comandos: ${ledger.getHistoryLength()}`);
+
+  println("\n✓ Command v2 ejecutado exitosamente.");
+};

@@ -1,0 +1,163 @@
+// =============================================================================
+// Patrón de Diseño: Observer v2 (Event Bus Concurrente CSP con Canales y Fibras)
+// =============================================================================
+// Propósito:
+//   Define una suscripción uno-a-muchos desacoplada donde la publicación de
+//   eventos notifica automáticamente a múltiples observadores concurrentes.
+//
+// En Aura:
+//   Reemplaza callbacks síncronos bloqueantes de POO con Concurrencia CSP nativa:
+//   los observadores se ejecutan en fibras independientes (`spawn`), comunicados
+//   por canales seguros con búfer (`Channel.make`), coordinados con `WaitGroup`.
+//
+// Características de Aura Lang Destacadas:
+//   - Fibras concurrentes M:N (`spawn`) y Canales tipados (`Channel.make`, send `<-`, receive `<-`).
+//   - Variables dinámicas (`DynamicVar.new`) para rastrear el emisor del bus.
+//   - Tipos Suma Algebraicos (ADTs) y Pattern Matching Exhaustivo para eventos de dominio.
+//   - Sincronización libre de condiciones de carrera con `WaitGroup.new()` y `await wg.wait()`.
+//   - Átomos internados (:fraud, :order, :audit) para clasificación instantánea.
+// =============================================================================
+
+let EVENT_BUS_REGION = DynamicVar.new("region-us-east-1");
+
+// 1. ADT: Eventos de Negocio del Dominio
+export type DomainEvent =
+  | OrderPlaced { orderId: String, amount: Float, customer: String }
+  | FraudAlert { orderId: String, riskScore: Int, reason: String }
+  | ShipmentDispatched { orderId: String, trackingNumber: String };
+
+// 2. Interfaz del Bus de Eventos (Duck Typing)
+export interface EventBroker {
+  publish(event: DomainEvent): Unit;
+}
+
+// 3. Demostración y Ejecución Concurrente
+export async fn main(): Task<Unit, String> => {
+  println("==================================================");
+  println("  PATRÓN OBSERVER v2 EN AURA LANG");
+  println("==================================================");
+
+  // Canales independientes para cada observador especializado
+  let analyticsCh = Channel.make<DomainEvent>(10);
+  let fraudSentinelCh = Channel.make<DomainEvent>(10);
+  let notificationsCh = Channel.make<DomainEvent>(10);
+
+  let wg = WaitGroup.new();
+  wg.add(3); // 3 observadores concurrentes
+
+  // Observador 1: Analytics Dashboard (Fiber concurrente)
+  spawn {
+    println("  📡 [Observer-Analytics] Fiber iniciado. Escuchando eventos de métricas...");
+    let mut receivedCount = 0;
+    while (receivedCount < 3) {
+      let optEv = <-analyticsCh;
+      match optEv {
+        Some(ev) => {
+          receivedCount = receivedCount + 1;
+          match ev {
+            OrderPlaced { orderId, amount, customer } =>
+              println(`     📊 [Analytics] Registrado volumen de venta: +$${amount} (Orden #${orderId})`),
+            FraudAlert { orderId, riskScore, reason } =>
+              println(`     📊 [Analytics] Registrada anomalía: score=${riskScore} en #${orderId}`),
+            ShipmentDispatched { orderId, trackingNumber } =>
+              println(`     📊 [Analytics] Registrado despacho de #${orderId} (Tracking: ${trackingNumber})`)
+          }
+        },
+        None => ()
+      };
+    }
+    println("  📡 [Observer-Analytics] Cuota procesada. Observador finalizado.");
+    wg.done();
+  };
+
+  // Observador 2: Fraud Sentinel (Fiber concurrente de alta prioridad)
+  spawn {
+    println("  🛡️ [Observer-FraudSentinel] Fiber iniciado. Vigilando transacciones...");
+    let mut receivedCount = 0;
+    while (receivedCount < 3) {
+      let optEv = <-fraudSentinelCh;
+      match optEv {
+        Some(ev) => {
+          receivedCount = receivedCount + 1;
+          match ev {
+            FraudAlert { orderId, riskScore, reason } =>
+              println(`     🚨 [FraudSentinel] ¡ACCIÓN INMEDIATA! Bloqueando fondos en #${orderId} (Riesgo: ${riskScore}/100 - ${reason})`),
+            _ => ()
+          }
+        },
+        None => ()
+      };
+    }
+    println("  🛡️ [Observer-FraudSentinel] Cuota procesada. Observador finalizado.");
+    wg.done();
+  };
+
+  // Observador 3: Customer Email / Push Notifier (Fiber concurrente)
+  spawn {
+    println("  💌 [Observer-Notifier] Fiber iniciado. Listo para despachar correos...");
+    let mut receivedCount = 0;
+    while (receivedCount < 3) {
+      let optEv = <-notificationsCh;
+      match optEv {
+        Some(ev) => {
+          receivedCount = receivedCount + 1;
+          match ev {
+            OrderPlaced { orderId, amount, customer } =>
+              println(`     ✉️ [Notifier] Email de confirmación enviado a <${customer}> para #${orderId}`),
+            ShipmentDispatched { orderId, trackingNumber } =>
+              println(`     ✉️ [Notifier] Notificación Push: Tu paquete #${orderId} va en camino (${trackingNumber})`),
+            _ => ()
+          }
+        },
+        None => ()
+      };
+    }
+    println("  💌 [Observer-Notifier] Cuota procesada. Observador finalizado.");
+    wg.done();
+  };
+
+  // 4. Implementación del Publicador (Sujeto / Subject)
+  let broker: EventBroker = {
+    publish: (event: DomainEvent): Unit => {
+      let region = EVENT_BUS_REGION.get();
+      println(`\n📢 [EVENT-BROKER @ ${region}] Publicando nuevo evento de dominio...`);
+      // Fan-out no bloqueante hacia todos los canales de observadores suscritos
+      analyticsCh <- event;
+      fraudSentinelCh <- event;
+      notificationsCh <- event;
+      ()
+    }
+  };
+
+  // 5. Emisión de Eventos desde el hilo principal con DynamicVar
+  EVENT_BUS_REGION.bind("cluster-cloud-primary", fn(): Unit => {
+    // Evento 1: Creación de Orden
+    let e1 = DomainEvent.OrderPlaced({
+      orderId: "ORD-2026-881",
+      amount: 499.95,
+      customer: "grace.hopper@nanoseconds.org"
+    });
+    broker.publish(e1);
+
+    // Evento 2: Alerta de Fraude
+    let e2 = DomainEvent.FraudAlert({
+      orderId: "ORD-2026-882",
+      riskScore: 94,
+      reason: "IP geolocalizada en nodo Tor con tarjeta clonada"
+    });
+    broker.publish(e2);
+
+    // Evento 3: Despacho de Paquete
+    let e3 = DomainEvent.ShipmentDispatched({
+      orderId: "ORD-2026-881",
+      trackingNumber: "TRK-DHL-992140"
+    });
+    broker.publish(e3);
+  });
+
+  // Esperar a que todos los observadores concurrentes completen el consumo
+  await wg.wait();
+
+  println("\n✓ Todos los observadores concurrentes terminaron su procesamiento sin bloqueos.");
+  println("✓ Observer v2 ejecutado exitosamente.");
+};

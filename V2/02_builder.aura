@@ -1,0 +1,172 @@
+// =============================================================================
+// Patrón de Diseño: Builder v2 (Constructor Inmutable de Cliente de Clúster)
+// =============================================================================
+// Propósito:
+//   Construye paso a paso configuraciones complejas de clientes distribuidos,
+//   garantizando inmutabilidad, validación estricta y rollback automático.
+//
+// Características de Aura Lang Destacadas:
+//   - Packed Structs (export packed struct) para empaquetado binario de cabeceras de red.
+//   - Átomos internados (:grpc, :http2, :quic, :round_robin) para modos y protocolos.
+//   - Slices nativos estilo Go ([]String, append, len, slicing).
+//   - Sentencia `errdefer` (estilo Zig) para revertir buffers en caso de error.
+//   - Spread inmutable funcional de registros ({ ...current, port: p }).
+//   - Duck Typing Estructural (interfaz ClusterClientBuilder).
+// =============================================================================
+
+// 1. Packed Struct: Cabecera binaria de protocolo de transporte
+export packed struct NetworkPacketHeader {
+  magic_bytes: Uint16,
+  protocol_id: Uint8,
+  flags: Uint8,
+  max_frame_kb: Uint16,
+};
+
+// 2. Configuración inmutable del clúster
+export type ClusterConfig = {
+  serviceName: String,
+  protocol: Atom,
+  loadBalancer: Atom,
+  port: Int,
+  timeoutMs: Int,
+  endpoints: []String,
+  header: NetworkPacketHeader,
+  enableMtls: Bool,
+};
+
+// 3. Interfaz del Builder con Fluent API
+export interface ClusterClientBuilder {
+  setProtocol(proto: Atom): ClusterClientBuilder;
+  setLoadBalancer(lb: Atom): ClusterClientBuilder;
+  setPort(p: Int): ClusterClientBuilder;
+  setTimeout(ms: Int): ClusterClientBuilder;
+  addEndpoint(ep: String): ClusterClientBuilder;
+  enableMtls(active: Bool): ClusterClientBuilder;
+  build(): Result<ClusterConfig, String>;
+}
+
+// 4. Implementación del Builder Inmutable
+export fn newClusterBuilder(current: ClusterConfig): ClusterClientBuilder => {
+  {
+    setProtocol: (proto: Atom): ClusterClientBuilder =>
+      newClusterBuilder({ ...current, protocol: proto }),
+
+    setLoadBalancer: (lb: Atom): ClusterClientBuilder =>
+      newClusterBuilder({ ...current, loadBalancer: lb }),
+
+    setPort: (p: Int): ClusterClientBuilder =>
+      newClusterBuilder({ ...current, port: p }),
+
+    setTimeout: (ms: Int): ClusterClientBuilder =>
+      newClusterBuilder({ ...current, timeoutMs: ms }),
+
+    addEndpoint: (ep: String): ClusterClientBuilder => {
+      let updatedEndpoints = append(current.endpoints, ep);
+      newClusterBuilder({ ...current, endpoints: updatedEndpoints })
+    },
+
+    enableMtls: (active: Bool): ClusterClientBuilder =>
+      newClusterBuilder({ ...current, enableMtls: active }),
+
+    build: (): Result<ClusterConfig, String> => {
+      // errdefer: si la validación falla, se notifica el rollback de staging
+      errdefer println(`  [ERRDEFER] ⚠️ Fallo al construir clúster '${current.serviceName}'. Reversando reservas de red.`);
+
+      if (current.port <= 0 || current.port > 65535) {
+        return Err(`Puerto TCP inválido: ${current.port}. Rango válido [1..65535].`);
+      }
+
+      if (len(current.endpoints) == 0) {
+        return Err("Debe especificarse al menos un endpoint en el clúster.");
+      }
+
+      if (current.timeoutMs < 100) {
+        return Err(`Timeout insuficiente: ${current.timeoutMs}ms. Mínimo permitido 100ms.`);
+      }
+
+      Ok(current)
+    }
+  }
+};
+
+// Constructor con valores iniciales por defecto seguros
+export fn defaultClusterBuilder(serviceName: String): ClusterClientBuilder => {
+  let defaultHeader: NetworkPacketHeader = {
+    magic_bytes: 51966, // 0xCAFE
+    protocol_id: 2,     // gRPC/HTTP2
+    flags: 1,
+    max_frame_kb: 4096,
+  };
+
+  let initialConfig: ClusterConfig = {
+    serviceName: serviceName,
+    protocol: :grpc,
+    loadBalancer: :round_robin,
+    port: 50051,
+    timeoutMs: 3000,
+    endpoints: [],
+    header: defaultHeader,
+    enableMtls: true,
+  };
+
+  newClusterBuilder(initialConfig)
+};
+
+// 5. Demostración y Ejecución
+export fn main(): Unit => {
+  println("==================================================");
+  println("  PATRÓN BUILDER v2 EN AURA LANG");
+  println("==================================================");
+
+  // A. Construcción exitosa de cliente gRPC con mTLS y múltiples endpoints
+  println("1. Construyendo Cliente de Microservicio de Pagos:");
+  let builder = defaultClusterBuilder("PaymentsCluster")
+    .setProtocol(:grpc)
+    .setLoadBalancer(:least_connections)
+    .setPort(9090)
+    .setTimeout(5000)
+    .addEndpoint("10.0.1.10:9090")
+    .addEndpoint("10.0.1.11:9090")
+    .addEndpoint("10.0.1.12:9090")
+    .enableMtls(true);
+
+  let resultSuccess = builder.build();
+
+  match resultSuccess {
+    Ok(cfg) => {
+      println(`✓ Clúster '${cfg.serviceName}' configurado exitosamente:`);
+      println(`  - Protocolo: ${cfg.protocol} | Balanceador: ${cfg.loadBalancer}`);
+      println(`  - Puerto: ${cfg.port} | Timeout: ${cfg.timeoutMs}ms | mTLS: ${cfg.enableMtls}`);
+      println(`  - Total Endpoints: ${len(cfg.endpoints)}`);
+      println(`  - Primer endpoint activo: ${cfg.endpoints[0]}`);
+      println(`  - Cabecera binaria mágica: 0x${cfg.header.magic_bytes}, Max Frame: ${cfg.header.max_frame_kb} KB`);
+    },
+    Err(e) => println(`✕ Error inesperado: ${e}`)
+  };
+
+  // B. Construcción con rebanado (slicing) de endpoints existentes
+  println("\n2. Creación de sub-clúster canario usando slicing:");
+  match resultSuccess {
+    Ok(cfg) => {
+      let canaryEndpoints = cfg.endpoints[0:2]; // Slicing estilo Golang
+      println(`  - Endpoints del clúster principal: ${len(cfg.endpoints)}`);
+      println(`  - Endpoints del sub-clúster canario [0:2]: ${len(canaryEndpoints)} (${canaryEndpoints[0]}, ${canaryEndpoints[1]})`);
+    },
+    Err(_) => ()
+  };
+
+  // C. Fallo de validación que dispara errdefer
+  println("\n3. Validación de Errores con disparo de errdefer:");
+  let invalidBuilder = defaultClusterBuilder("FaultyCluster")
+    .setPort(99999) // Fuera de rango
+    .addEndpoint("10.0.0.1:80");
+
+  let resultError = invalidBuilder.build();
+
+  match resultError {
+    Ok(_) => println("✕ No debió construirse"),
+    Err(err) => println(`✓ Validación interceptó el error esperado: "${err}"`)
+  };
+
+  println("\n✓ Builder v2 ejecutado exitosamente.");
+};

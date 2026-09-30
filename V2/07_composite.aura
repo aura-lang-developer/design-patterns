@@ -1,0 +1,153 @@
+// =============================================================================
+// Patrón de Diseño: Composite v2 (Árbol de Ejecución de Tareas y DAG de Flujo)
+// =============================================================================
+// Propósito:
+//   Compone tareas computacionales en estructuras jerárquicas de árbol
+//   (hojas individuales, etapas secuenciales y clústeres paralelos),
+//   permitiendo a los clientes evaluar costos y duraciones de forma uniforme.
+//
+// Características de Aura Lang Destacadas:
+//   - Tipos Suma Algebraicos Recursivos (ADTs) con registros asociados.
+//   - Pattern Matching Exhaustivo para cálculo de ruta crítica (max en paralelo, suma en secuencial).
+//   - Átomos internados (:critical, :high, :normal, :low) para prioridades.
+//   - Transductores funcionales (`compose`, `filtering`, `mapping`, `into`) para extracción cero-copia.
+//   - Slices nativos estilo Go ([]String, len).
+// =============================================================================
+
+// 1. ADT Recursivo: Nodos de Flujo de Trabajo (Composite Pattern)
+export type WorkflowNode =
+  | TaskItem { name: String, durationMs: Int, priority: Atom }
+  | SequentialStage { name: String, steps: List<WorkflowNode> }
+  | ParallelCluster { name: String, branches: List<WorkflowNode> };
+
+// 2. Operación Uniforme: Cálculo de Duración Total de la Ruta Crítica
+export fn calculateCriticalPathMs(node: WorkflowNode): Int => {
+  match node {
+    TaskItem { name, durationMs, priority } => durationMs,
+    SequentialStage { name, steps } => {
+      let mut total = 0;
+      for step in steps {
+        total = total + calculateCriticalPathMs(step);
+      }
+      total
+    },
+    ParallelCluster { name, branches } => {
+      let mut maxDuration = 0;
+      for branch in branches {
+        let d = calculateCriticalPathMs(branch);
+        if (d > maxDuration) {
+          maxDuration = d;
+        }
+      }
+      maxDuration
+    }
+  }
+};
+
+// 3. Operación Uniforme: Conteo Total de Tareas Atómicas
+export fn countTotalTasks(node: WorkflowNode): Int => {
+  match node {
+    TaskItem { name, durationMs, priority } => 1,
+    SequentialStage { name, steps } => {
+      let mut sum = 0;
+      for step in steps {
+        sum = sum + countTotalTasks(step);
+      }
+      sum
+    },
+    ParallelCluster { name, branches } => {
+      let mut sum = 0;
+      for branch in branches {
+        sum = sum + countTotalTasks(branch);
+      }
+      sum
+    }
+  }
+};
+
+// 4. Operación Uniforme: Renderizado Visual Jerárquico del DAG
+export fn renderWorkflowTree(node: WorkflowNode, prefix: String = ""): Unit => {
+  match node {
+    TaskItem { name, durationMs, priority } => {
+      println(`${prefix}⚡ [TASK] ${name} (${durationMs}ms) [Prioridad: ${priority}]`);
+    },
+    SequentialStage { name, steps } => {
+      println(`${prefix}➡️ [SEQ STAGE] ${name}/ (Total pasos: ${steps.length})`);
+      for step in steps {
+        renderWorkflowTree(step, `${prefix}   ├── `);
+      }
+    },
+    ParallelCluster { name, branches } => {
+      println(`${prefix}🔀 [PARALLEL CLUSTER] ${name}/ (Total ramas concurrentes: ${branches.length})`);
+      for branch in branches {
+        renderWorkflowTree(branch, `${prefix}   ├── `);
+      }
+    }
+  }
+};
+
+// 5. Demostración y Ejecución
+export fn main(): Unit => {
+  println("==================================================");
+  println("  PATRÓN COMPOSITE v2 EN AURA LANG");
+  println("==================================================");
+
+  // A. Construcción del DAG jerárquico
+  // Flujo:
+  // SequentialStage: "Build & Deploy Pipeline"
+  //   ├── TaskItem: "Lint & Static Check" (150ms)
+  //   ├── ParallelCluster: "Test Matrix" (max: 600ms)
+  //   │     ├── TaskItem: "Unit Tests" (200ms)
+  //   │     ├── TaskItem: "Integration Tests" (600ms)
+  //   │     └── TaskItem: "Security CVE Scan" (450ms)
+  //   └── SequentialStage: "Artifact Generation"
+  //         ├── TaskItem: "Compile Standalone Binary" (350ms)
+  //         └── TaskItem: "Docker Build & Push" (500ms)
+
+  let t1 = WorkflowNode.TaskItem({ name: "Lint & Static Check", durationMs: 150, priority: :normal });
+  let t2 = WorkflowNode.TaskItem({ name: "Unit Tests", durationMs: 200, priority: :high });
+  let t3 = WorkflowNode.TaskItem({ name: "Integration Tests", durationMs: 600, priority: :critical });
+  let t4 = WorkflowNode.TaskItem({ name: "Security CVE Scan", durationMs: 450, priority: :critical });
+
+  let parallelTests = WorkflowNode.ParallelCluster({
+    name: "Test Matrix",
+    branches: [t2, t3, t4],
+  });
+
+  let t5 = WorkflowNode.TaskItem({ name: "Compile Standalone Binary", durationMs: 350, priority: :high });
+  let t6 = WorkflowNode.TaskItem({ name: "Docker Build & Push", durationMs: 500, priority: :normal });
+
+  let stageArtifacts = WorkflowNode.SequentialStage({
+    name: "Artifact Generation",
+    steps: [t5, t6],
+  });
+
+  let rootPipeline = WorkflowNode.SequentialStage({
+    name: "Root CI/CD Pipeline",
+    steps: [t1, parallelTests, stageArtifacts],
+  });
+
+  println("1. Visualización Jerárquica del Flujo Compuesto (Tree View):\n");
+  renderWorkflowTree(rootPipeline, "");
+
+  println("\n2. Evaluación Polimórfica Uniforme de la Estructura:");
+  let totalTasks = countTotalTasks(rootPipeline);
+  let criticalPath = calculateCriticalPathMs(rootPipeline);
+
+  println(`  - Total de tareas atómicas contenidas: ${totalTasks}`);
+  println(`  - Duración de la Ruta Crítica calculada: ${criticalPath}ms`);
+  println("    (Cálculo: 150ms + max(200, 600, 450)ms + (350 + 500)ms = 150 + 600 + 850 = 1600ms)");
+
+  println("\n3. Extracción de Tareas Críticas con Transductor Funcional:");
+  let rawDurations: List<Int> = [150, 200, 600, 450, 350, 500];
+  let highDurationXform = compose(
+    filtering(fn(d: Int): Bool => d >= 400),
+    mapping(fn(d: Int): Int => d + 50), // Margen de seguridad +50ms
+    taking(2)
+  );
+
+  let criticalBudget = into([], highDurationXform, rawDurations);
+  println(`  - Top 2 duraciones críticas con margen (+50ms): ${criticalBudget}`);
+
+  println("\n✓ Composite v2 ejecutado exitosamente.");
+};

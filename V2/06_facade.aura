@@ -1,0 +1,154 @@
+// =============================================================================
+// Patrón de Diseño: Facade v2 (Fachada de Despliegue CI/CD Cloud-Native)
+// =============================================================================
+// Propósito:
+//   Proporciona una interfaz unificada y simple a un conjunto complejo de
+//   subsistemas distribuidos (Seguridad, Registro de Imágenes, Kubernetes e Ingress).
+//
+// Características de Aura Lang Destacadas:
+//   - Sentencia `errdefer` (estilo Zig) para orquestar rollbacks automáticos ante fallos.
+//   - Sentencia `defer` determinista para registrar métricas y liberar recursos.
+//   - Átomos internados (:canary, :blue_green, :clean, :critical) para estrategias y estados.
+//   - Slices nativos estilo Go ([]String, len, append) para IPs de réplicas.
+//   - Duck Typing Estructural (interfaz DeploymentFacade).
+//   - Manejo de errores composable con tipos `Result<T, E>`.
+// =============================================================================
+
+// Estructura del recibo de despliegue
+export type DeploymentReceipt = {
+  releaseId: String,
+  strategy: Atom,
+  imageDigest: String,
+  assignedPods: []String,
+  ingressUrl: String,
+};
+
+// 1. Interfaz de la Fachada Unificada (Duck Typing)
+export interface DeploymentFacade {
+  deployRelease(service: String, version: String, strategy: Atom, skipSecurityScan: Bool): Result<DeploymentReceipt, String>;
+}
+
+// 2. Subsistemas Complejos Subyacentes
+
+// Subsistema A: Escáner de Vulnerabilidades
+export fn scanImageArtifacts(imageTag: String, allowVulnerabilities: Bool): Result<Atom, String> => {
+  println(`  [1. SecScanner] 🔍 Escaneando vulnerabilidades CVE en imagen: ${imageTag}...`);
+  if (!allowVulnerabilities && imageTag == "payment-service:v2.4-compromised") {
+    return Err("CVE-2026-9042 crítico detectado en dependencias base.");
+  }
+  println("  [1. SecScanner] ✓ Escaneo superado: 0 vulnerabilidades críticas encontradas.");
+  Ok(:clean)
+};
+
+// Subsistema B: Registro de Contenedores
+export fn pushContainerImage(imageTag: String): Result<String, String> => {
+  println(`  [2. ContainerRegistry] 🐳 Subiendo capas de imagen a registry.internal.aura.io/${imageTag}...`);
+  Ok("sha256:7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069")
+};
+
+// Subsistema C: Clúster Kubernetes
+export fn rollOutPods(service: String, digest: String, replicaCount: Int): Result<[]String, String> => {
+  println(`  [3. Kubernetes] ☸️ Desplegando ${replicaCount} pods para servicio '${service}'...`);
+  let mut pods: []String = [];
+  pods = append(pods, "10.244.1.42");
+  pods = append(pods, "10.244.2.89");
+  pods = append(pods, "10.244.3.15");
+  println(`  [3. Kubernetes] ✓ ${len(pods)} réplicas operativas y en estado Running.`);
+  Ok(pods)
+};
+
+// Subsistema D: Enrutador Ingress / Balanceador
+export fn configureTrafficIngress(service: String, strategy: Atom): Result<String, String> => {
+  let url = match strategy {
+    :canary => `https://canary.aura.cloud/${service}`,
+    _ => `https://api.aura.cloud/${service}`
+  };
+  println(`  [4. IngressGateway] 🌐 Enrutando tráfico externo hacia ${url} (Estrategia: ${strategy})...`);
+  Ok(url)
+};
+
+// 3. Implementación de la Fachada (Facade)
+export fn createDeploymentEngine(): DeploymentFacade => {
+  {
+    deployRelease: (service: String, version: String, strategy: Atom, skipSecurityScan: Bool): Result<DeploymentReceipt, String> => {
+      println(`\n🚀 [FACADE] Iniciando orquestación de release para '${service}:${version}'...`);
+
+      defer println(`📋 [FACADE] << Orquestación de release finalizada para '${service}'.`);
+      errdefer println("🚨 [FACADE-ROLLBACK] Error en el pipeline. Revirtiendo despliegue en Kubernetes y limpiando Ingress.");
+
+      let imageTag = `${service}:${version}`;
+
+      // Paso 1: Seguridad
+      let scanRes = scanImageArtifacts(imageTag, skipSecurityScan);
+      match scanRes {
+        Err(err) => Err(`Fallo en etapa de seguridad: ${err}`),
+        Ok(_) => {
+          // Paso 2: Registro de contenedores
+          let pushRes = pushContainerImage(imageTag);
+          match pushRes {
+            Err(e) => Err(`Fallo al publicar imagen: ${e}`),
+            Ok(digest) => {
+              // Paso 3: Kubernetes
+              let k8sRes = rollOutPods(service, digest, 3);
+              match k8sRes {
+                Err(e) => Err(`Fallo al desplegar pods: ${e}`),
+                Ok(pods) => {
+                  // Paso 4: Ingress
+                  let ingressRes = configureTrafficIngress(service, strategy);
+                  match ingressRes {
+                    Err(e) => Err(`Fallo al configurar ingress: ${e}`),
+                    Ok(ingressUrl) => {
+                      let receipt: DeploymentReceipt = {
+                        releaseId: `REL-${service}-2026-99`,
+                        strategy: strategy,
+                        imageDigest: digest,
+                        assignedPods: pods,
+                        ingressUrl: ingressUrl,
+                      };
+                      Ok(receipt)
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+};
+
+// 4. Demostración y Ejecución
+export fn main(): Unit => {
+  println("==================================================");
+  println("  PATRÓN FACADE v2 EN AURA LANG");
+  println("==================================================");
+
+  let facade = createDeploymentEngine();
+
+  // Caso 1: Despliegue exitoso coordinando todos los subsistemas
+  println("1. Despliegue Canario Exitoso:");
+  let resSuccess = facade.deployRelease("payment-service", "v2.4-stable", :canary, false);
+  match resSuccess {
+    Ok(receipt) => {
+      println("\n✓ Despliegue completado satisfactoriamente por la Fachada:");
+      println(`  - Release ID: ${receipt.releaseId}`);
+      println(`  - Estrategia: ${receipt.strategy}`);
+      println(`  - Digest: ${receipt.imageDigest}`);
+      println(`  - Réplicas activas: ${len(receipt.assignedPods)} (${receipt.assignedPods[0]}, ...)`);
+      println(`  - Ingress URL: ${receipt.ingressUrl}`);
+    },
+    Err(err) => println(`✕ Error: ${err}`)
+  };
+
+  // Caso 2: Intento con imagen vulnerada (falla en Subsistema 1 y activa errdefer)
+  println("\n--------------------------------------------------");
+  println("2. Despliegue con Vulnerabilidad Crítica detectada:");
+  let resFail = facade.deployRelease("payment-service", "v2.4-compromised", :blue_green, false);
+  match resFail {
+    Ok(_) => println("✕ No debió desplegarse"),
+    Err(err) => println(`✓ Fachada detuvo el pipeline y emitió error: "${err}"`)
+  };
+
+  println("\n✓ Facade v2 ejecutado exitosamente.");
+};

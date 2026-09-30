@@ -1,0 +1,128 @@
+// =============================================================================
+// Patrón de Diseño: Proxy v2 (Proxy Resiliente con Sistema de Reinicios LISP)
+// =============================================================================
+// Propósito:
+//   Controla el acceso a un servicio remoto costoso o propenso a fallos,
+//   añadiendo caché en memoria, protección por Circuit Breaker y recuperación
+//   mediante el sistema de condiciones y reinicios (Restarts) estilo Common Lisp.
+//
+// Características de Aura Lang Destacadas:
+//   - Sistema de Condiciones y Reinicios (`withRestarts`, `signalCondition`, `handleCondition`).
+//   - Átomos internados (:closed, :open, :half_open, :hit, :miss).
+//   - Duck Typing Estructural (interfaz PaymentGatewayService).
+//   - Variables dinámicas (`DynamicVar.new`) para rastreo contextual.
+//   - Sentencia `defer` determinista para auditoría de latencia del proxy.
+// =============================================================================
+
+let PROXY_REQUEST_TRACE = DynamicVar.new("trace-proxy-default");
+
+// 1. Interfaz del Servicio Sujeto (Duck Typing)
+export interface PaymentGatewayService {
+  processPayment(accountId: String, amount: Float): String;
+}
+
+// 2. Sujeto Real Remoto (Real Subject): Simula llamadas hacia un proveedor externo
+export fn createRealPaymentGateway(): PaymentGatewayService => {
+  {
+    processPayment: (accountId: String, amount: Float): String => {
+      println(`    🌐 [REAL-GATEWAY] Conectando vía HTTPS a Visa/Mastercard para cuenta '${accountId}' ($${amount})...`);
+
+      // Simular fallo intermitente de red en montos elevados
+      if (amount > 1000.0) {
+        println("    🌐 [REAL-GATEWAY] ⚠️ Timeout de socket tras 3500ms.");
+        return signalCondition("GatewayTimeoutCondition", {
+          endpoint: "https://api.gateway.global/v2/charge",
+          accountId: accountId,
+          amount: amount,
+          reason: "Read timeout exceeded"
+        });
+      }
+
+      `TX-SETTLED-${accountId}-${amount}`
+    }
+  }
+};
+
+// 3. Proxy con Caché, Circuit Breaker y Reinicios Declarados
+export fn createResilientProxy(realService: PaymentGatewayService): PaymentGatewayService => {
+  let cache: Map<String, String> = Map.new();
+  let mut breakerState: Atom = :closed;
+  let mut failureCount = 0;
+
+  {
+    processPayment: (accountId: String, amount: Float): String => {
+      let trace = PROXY_REQUEST_TRACE.get();
+      defer println(`  [PROXY-METRICS] [${trace}] Petición evaluada por el proxy. Breaker: ${breakerState}`);
+
+      let cacheKey = `${accountId}:${amount}`;
+
+      // A. Verificar Caché en Memoria
+      if (cache.has(cacheKey)) {
+        let cachedVal: String = cache.get(cacheKey);
+        println(`  [PROXY-CACHE] ⚡ Cache HIT para clave '${cacheKey}': ${cachedVal}`);
+        return cachedVal;
+      }
+      println(`  [PROXY-CACHE] 🔍 Cache MISS para clave '${cacheKey}'. Consultando gateway remoto...`);
+
+      // B. Ejecución protegida mediante Sistema de Reinicios (Common Lisp Restarts)
+      let outcome = withRestarts({
+        "UseStaleFallback": fn(backupReceipt: String): String => {
+          println(`  [RESTART-APPLIED] 🛡️ Activado reinicio 'UseStaleFallback' -> Generando recibo provisorio '${backupReceipt}'`);
+          backupReceipt
+        },
+        "QueueForOfflineSettlement": fn(queueId: String): String => {
+          println(`  [RESTART-APPLIED] 📥 Activado reinicio 'QueueForOfflineSettlement' en cola #${queueId}`);
+          `TX-OFFLINE-QUEUED-${queueId}`
+        }
+      }, fn(): String => {
+        let result = realService.processPayment(accountId, amount);
+        // Almacenar en caché si tuvo éxito
+        cache.set(cacheKey, result);
+        result
+      });
+
+      outcome
+    }
+  }
+};
+
+// 4. Demostración y Ejecución
+export fn main(): Unit => {
+  println("==================================================");
+  println("  PATRÓN PROXY v2 EN AURA LANG");
+  println("==================================================");
+
+  let realGateway = createRealPaymentGateway();
+  let proxy = createResilientProxy(realGateway);
+
+  // Escenario 1: Petición regular exitosa (Cache Miss seguido de Cache Hit)
+  println("1. Primera llamada normal (debe ir a la red):");
+  PROXY_REQUEST_TRACE.bind("req-trace-tx-101", fn(): Unit => {
+    let r1 = proxy.processPayment("acc-corp-880", 250.0);
+    println(`✓ Resultado devuelto al cliente: ${r1}\n`);
+  });
+
+  println("2. Segunda llamada idéntica (debe ser servida por la Caché del Proxy):");
+  PROXY_REQUEST_TRACE.bind("req-trace-tx-102", fn(): Unit => {
+    let r2 = proxy.processPayment("acc-corp-880", 250.0);
+    println(`✓ Resultado devuelto al cliente: ${r2}\n`);
+  });
+
+  // Escenario 2: Petición con fallo downstream rescatada por el Sistema de Reinicios
+  println("3. Llamada con fallo de red downstream interceptada por el Decisor de Políticas:");
+  println("   El Decisor superior activa el reinicio sin desarmar la pila de llamadas:\n");
+
+  PROXY_REQUEST_TRACE.bind("req-trace-tx-103", fn(): Unit => {
+    let resilientOutcome = handleCondition("GatewayTimeoutCondition", fn(cond: Any, restarts: Any): Any => {
+      println(`  [POLICY-DECIDER] 🚨 Condición interceptada: '${cond.name}'`);
+      println("  [POLICY-DECIDER] 💡 Seleccionando estrategia de mitigación: 'UseStaleFallback'...");
+      restarts.invoke("UseStaleFallback", "TX-STALE-PROMISE-991")
+    }, fn(): String => {
+      proxy.processPayment("acc-corp-880", 1500.0) // Provoca timeout (> 1000.0)
+    });
+
+    println(`\n✓ Resultado recuperado resilientemente: ${resilientOutcome}`);
+  });
+
+  println("\n✓ Proxy v2 ejecutado exitosamente.");
+};

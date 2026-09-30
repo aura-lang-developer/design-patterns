@@ -1,0 +1,233 @@
+// =============================================================================
+// Patrón de Diseño: Dependency Injection & IoC v2 (Inyección de Dependencias Pura)
+// =============================================================================
+// Propósito:
+//   Desacopla los servicios de dominio de los componentes de infraestructura
+//   (Bases de datos, Colas de mensajes, Colectores de telemetría), permitiendo
+//   intercambiar implementaciones para producción o testing sin tocar la lógica central.
+//
+// Características de Aura Lang Destacadas:
+//   - Inversión de Control (IoC) mediante Pure DI por constructor.
+//   - Duck Typing Estructural (interfaces implícitas sin `implements`).
+//   - Variables dinámicas (`DynamicVar.new`) para inyectar contexto de inquilino/ambiente.
+//   - Sentencia `defer` determinista para registro de métricas y latencia.
+//   - Sentencia `errdefer` para alarmas transaccionales ante conflictos.
+//   - Slices nativos estilo Go ([]String, len, append) para roles de usuario.
+//   - Átomos internados (:postgres, :mock_db, :active, :suspended).
+// =============================================================================
+
+// Variable dinámica para propagar el contexto del inquilino (Tenant) a las dependencias
+let TENANT_INJECTION_SCOPE = DynamicVar.new("acme-enterprise-prod");
+
+// 1. Modelos del Dominio
+export type UserProfile = {
+  id: String,
+  name: String,
+  email: String,
+  roles: []String,
+  status: Atom,
+};
+
+// 2. Puertos y Abstracciones (Interfaces Duck Typing)
+
+// Puerto A: Repositorio de Usuarios
+export interface UserRepository {
+  getProvider(): Atom;
+  findByEmail(email: String): Option<UserProfile>;
+  save(user: UserProfile): Result<UserProfile, String>;
+}
+
+// Puerto B: Bus de Mensajería / Notificaciones
+export interface EventPublisher {
+  publishUserCreated(user: UserProfile): Unit;
+}
+
+// Puerto C: Colector de Métricas
+export interface MetricsClient {
+  incrementCounter(metric: String, tag: String): Unit;
+}
+
+// 3. Servicio de Dominio (Sujeto de Inyección de Dependencias)
+export interface RegistrationService {
+  registerUser(id: String, name: String, email: String, roles: []String): Result<UserProfile, String>;
+}
+
+// Constructor con Inyección Pura por Parámetros (Pure DI)
+export fn createRegistrationService(
+  repo: UserRepository,
+  publisher: EventPublisher,
+  metrics: MetricsClient
+): RegistrationService => {
+  {
+    registerUser: (id: String, name: String, email: String, roles: []String): Result<UserProfile, String> => {
+      let tenant = TENANT_INJECTION_SCOPE.get();
+      println(`\n>> [RegistrationService @ Tenant: ${tenant}] Iniciando registro para '${name}' <${email}>...`);
+
+      // Defer: registrar métrica de salida
+      defer metrics.incrementCounter("user_registration_completed", tenant);
+      // Errdefer: alertar si el registro colisiona
+      errdefer metrics.incrementCounter("user_registration_failed", tenant);
+
+      // 1. Verificar si el usuario ya existe a través de la interfaz del repositorio
+      let existingOpt = repo.findByEmail(email);
+      let alreadyExists = match existingOpt {
+        Some(_) => true,
+        None => false
+      };
+
+      if (alreadyExists) {
+        return Err(`Ya existe un usuario con el correo: ${email}`);
+      }
+
+      let newUser: UserProfile = {
+        id: id,
+        name: name,
+        email: email,
+        roles: roles,
+        status: :active,
+      };
+
+      // 2. Persistir usuario mediante el repositorio inyectado
+      let saveRes = repo.save(newUser);
+      match saveRes {
+        Err(e) => Err(e),
+        Ok(saved) => {
+          // 3. Notificar a través del publicador de eventos inyectado
+          publisher.publishUserCreated(saved);
+          Ok(saved)
+        }
+      }
+    }
+  }
+};
+
+// 4. Adaptadores de Producción (Real Infrastructure)
+
+export fn createPostgresUserRepository(): UserRepository => {
+  let mut store: Map<String, UserProfile> = Map.new();
+
+  {
+    getProvider: (): Atom => :postgres,
+
+    findByEmail: (email: String): Option<UserProfile> => {
+      let tenant = TENANT_INJECTION_SCOPE.get();
+      let k = `${tenant}:${email}`;
+      if (store.has(k)) {
+        let u: UserProfile = store.get(k);
+        return Some(u);
+      }
+      None
+    },
+
+    save: (user: UserProfile): Result<UserProfile, String> => {
+      let tenant = TENANT_INJECTION_SCOPE.get();
+      let k = `${tenant}:${user.email}`;
+      println(`  [Postgres-DB @ ${tenant}] INSERT INTO users (id, email, roles) VALUES ('${user.id}', '${user.email}', ${len(user.roles)})`);
+      store.set(k, user);
+      Ok(user)
+    }
+  }
+};
+
+export fn createCloudEventPublisher(): EventPublisher => {
+  {
+    publishUserCreated: (user: UserProfile): Unit => {
+      println(`  [CloudPubSub] 📨 Evento 'user.created' publicado para '${user.email}' (Roles: ${len(user.roles)})`);
+    }
+  }
+};
+
+export fn createPrometheusMetricsClient(): MetricsClient => {
+  {
+    incrementCounter: (metric: String, tag: String): Unit => {
+      println(`  [Prometheus] 📊 Contador incrementado: ${metric} [tag=${tag}]`);
+    }
+  }
+};
+
+// 5. Adaptadores para Pruebas Unitarias (Mocks sin infraestructura externa)
+
+export fn createMockUserRepository(): UserRepository => {
+  {
+    getProvider: (): Atom => :mock_db,
+    findByEmail: (email: String): Option<UserProfile> => None, // Siempre disponible para pruebas
+    save: (user: UserProfile): Result<UserProfile, String> => Ok(user)
+  }
+};
+
+export fn createMockEventPublisher(): EventPublisher => {
+  {
+    publishUserCreated: (user: UserProfile): Unit => {
+      println(`  [MockPublisher] ✓ Capturada publicación de evento para '${user.email}' (sin red)`);
+    }
+  }
+};
+
+export fn createMockMetricsClient(): MetricsClient => {
+  {
+    incrementCounter: (metric: String, tag: String): Unit => {
+      // Silencioso en pruebas unitarias
+      ()
+    }
+  }
+};
+
+// 6. Demostración y Ejecución (Composition Root)
+export fn main(): Unit => {
+  println("==================================================");
+  println("  PATRÓN DEPENDENCY INJECTION v2 EN AURA LANG");
+  println("==================================================");
+
+  // -------------------------------------------------------------
+  // Escenario 1: Ensamble de Producción (Production Wiring)
+  // -------------------------------------------------------------
+  println("1. Escenario de Producción con Infraestructura Real:");
+
+  let prodRepo = createPostgresUserRepository();
+  let prodPublisher = createCloudEventPublisher();
+  let prodMetrics = createPrometheusMetricsClient();
+
+  // Inyección Pura en el Punto de Composición
+  let prodService = createRegistrationService(prodRepo, prodPublisher, prodMetrics);
+
+  TENANT_INJECTION_SCOPE.bind("prod-latam-cluster", fn(): Unit => {
+    let roles: []String = ["admin", "infra-engineer", "auditor"];
+    let r1 = prodService.registerUser("usr-101", "Ada Lovelace", "ada@computing.org", roles);
+    match r1 {
+      Ok(u) => println(`✓ [Producción] Registrado usuario #${u.id}: ${u.name} (Roles: ${len(u.roles)})`),
+      Err(e) => println(`✕ Error: ${e}`)
+    };
+
+    // Intento de registro duplicado para verificar validación y errdefer
+    let r2 = prodService.registerUser("usr-102", "Ada Clone", "ada@computing.org", ["guest"]);
+    match r2 {
+      Ok(_) => println("✕ No debió registrar duplicado"),
+      Err(err) => println(`✓ Validación esperada capturada: "${err}"`)
+    };
+  });
+
+  // -------------------------------------------------------------
+  // Escenario 2: Ensamble de Pruebas Unitarias (Mock Wiring)
+  // -------------------------------------------------------------
+  println("\n--------------------------------------------------");
+  println("2. Escenario de Pruebas Unitarias con Mocks Aislados:");
+  println("   El servicio de dominio se prueba sin red, base de datos ni brokers:");
+
+  let mockRepo = createMockUserRepository();
+  let mockPublisher = createMockEventPublisher();
+  let mockMetrics = createMockMetricsClient();
+
+  // Se inyectan exactamente los mismos puertos pero con implementaciones Mock
+  let testService = createRegistrationService(mockRepo, mockPublisher, mockMetrics);
+
+  TENANT_INJECTION_SCOPE.bind("test-local-env", fn(): Unit => {
+    let testRoles: []String = ["tester"];
+    let testRes = testService.registerUser("usr-test-01", "Alan Turing", "alan@bletchley.gov.uk", testRoles);
+    match testRes {
+      Ok(u) => println(`✓ Test Unitario Exitoso: Usuario mock registrado (${u.name})`),
+      Err(e) => println(`✕ Fallo en prueba: ${e}`)
+    };
+  });
+
+  println("\n✓ Dependency Injection v2 ejecutado exitosamente.");
+};

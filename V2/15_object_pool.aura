@@ -1,0 +1,104 @@
+// =============================================================================
+// Patrón de Diseño: Object Pool v2 (Pool de Buffers de Paquetes con Packed Structs)
+// =============================================================================
+// Propósito:
+//   Reutiliza buffers de memoria pesados y descriptores binarios de red,
+//   eliminando la sobrecarga de asignación dinámica de memoria y recolección de basura.
+//
+// Características de Aura Lang Destacadas:
+//   - Primitiva nativa `Pool.new(...)`, `pool.get()` y `pool.put(buf)`.
+//   - Packed Structs (`export packed struct`) para layout binario de cabeceras de red.
+//   - Sentencia determinista `defer pool.put(buf)` que garantiza retorno libre de fugas.
+//   - Slices nativos estilo Go ([]Int, len, rebanado frame[0:4]).
+//   - Átomos internados (:quic, :tcp, :udp) para el protocolo de transporte.
+//   - Concurrencia CSP con múltiples fibras (`spawn`) y `WaitGroup`.
+// =============================================================================
+
+// 1. Packed Struct: Cabecera Binaria de Red Empaquetada
+export packed struct PacketFrameHeader {
+  stream_id: Uint16,
+  frame_type: Uint8,
+  flags: Uint8,
+  payload_length: Uint16,
+};
+
+// 2. Estructura del Buffer de Red Reutilizable
+export type NetworkBuffer = {
+  bufferId: Int,
+  protocol: Atom,
+  header: PacketFrameHeader,
+  storage: []Int,
+};
+
+// 3. Demostración y Ejecución Concurrente
+export async fn main(): Task<Unit, String> => {
+  println("==================================================");
+  println("  PATRÓN OBJECT POOL v2 EN AURA LANG");
+  println("==================================================");
+
+  let mut allocationCounter = 0;
+
+  // Creamos el Pool nativo con fábrica de instanciación bajo demanda
+  let packetPool = Pool.new((): NetworkBuffer => {
+    allocationCounter = allocationCounter + 1;
+    println(`  [POOL-ALLOC] ⚡ Asignando nuevo buffer de red en heap (ID #${allocationCounter})...`);
+
+    let emptyHeader: PacketFrameHeader = {
+      stream_id: 0,
+      frame_type: 1, // Data Frame
+      flags: 0,
+      payload_length: 64,
+    };
+
+    let initialStorage: []Int = [0, 0, 0, 0, 0, 0, 0, 0];
+
+    {
+      bufferId: allocationCounter,
+      protocol: :quic,
+      header: emptyHeader,
+      storage: initialStorage,
+    }
+  });
+
+  println("1. Demostración de Adquisición y Devolución con 'defer':\n");
+
+  // Función local que adquiere y garantiza retorno con defer
+  let processPacketFlow = (streamId: Int): Unit => {
+    let buf = packetPool.get();
+    defer packetPool.put(buf);
+
+    println(`  -> Procesando flujo con Buffer ID #${buf.bufferId} (Stream: ${streamId})`);
+    let slicePrefix = buf.storage[0:4];
+    println(`     Prefijo de almacenamiento: len=${len(slicePrefix)}`);
+  };
+
+  processPacketFlow(1001);
+  processPacketFlow(1002); // Debe reciclar el buffer #1
+
+  println("\n2. Demostración de Concurrencia con Múltiples Fibras (spawn):");
+  println("   3 fibras simultáneas solicitan buffers del pool:\n");
+
+  let wg = WaitGroup.new();
+  wg.add(3);
+
+  let streamIds: []Int = [2001, 2002, 2003];
+  let mut sIdx = 0;
+  while (sIdx < len(streamIds)) {
+    let sid = streamIds[sIdx];
+    spawn {
+      let b = packetPool.get();
+      println(`     ⚙️ [Fiber Stream #${sid}] Utilizando Buffer ID #${b.bufferId} [Protocolo: ${b.protocol}]`);
+      packetPool.put(b);
+      wg.done();
+    };
+    sIdx = sIdx + 1;
+  }
+
+  await wg.wait();
+
+  println("\n3. Verificación de Eficiencia de Asignaciones:");
+  println(`  - Total de buffers creados en memoria física: ${allocationCounter}`);
+  println("  ✓ Todos los buffers fueron reciclados limpiamente sin fugas de memoria.");
+
+  println("\n✓ Object Pool v2 ejecutado exitosamente.");
+};

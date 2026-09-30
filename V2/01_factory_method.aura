@@ -1,0 +1,134 @@
+// =============================================================================
+// Patrón de Diseño: Factory Method v2 (Fábrica de Ingesta de Telemetría Cloud)
+// =============================================================================
+// Propósito:
+//   Define una interfaz para procesar eventos de observabilidad, delegando a
+//   fábricas tipadas la creación y despacho de variantes concretas de eventos.
+//
+// Características de Aura Lang Destacadas:
+//   - Tipos Suma Algebraicos (ADTs) con registros asociados y pattern matching exhaustivo.
+//   - Átomos internados (:info, :critical, :prometheus, :datadog) para O(1) matching.
+//   - Slices nativos estilo Go ([]String, []IngestEvent, len, append).
+//   - Duck Typing Estructural (interfaz TelemetrySink implícita).
+//   - Sentencia `defer` determinista para vaciado garantizado de buffers.
+// =============================================================================
+
+// 1. ADT: Jerarquía exhaustiva de eventos de observabilidad
+export type IngestEvent =
+  | Metric { name: String, value: Float, tags: []String }
+  | LogRecord { level: Atom, message: String, timestampMs: Int }
+  | SecurityAlert { threatLevel: Atom, sourceIp: String, ruleId: String }
+  | Heartbeat { serviceId: String, status: Atom };
+
+// 2. Interfaz estructural para sumideros de telemetría (Duck Typing)
+export interface TelemetrySink {
+  getSinkName(): String;
+  dispatch(event: IngestEvent): Result<String, String>;
+  flush(): Unit;
+}
+
+// 3. Fábrica y despachador de eventos
+export fn createTelemetrySink(targetProvider: Atom): TelemetrySink => {
+  let providerName = match targetProvider {
+    :prometheus => "Prometheus-PushGateway",
+    :datadog => "Datadog-Agent-v7",
+    :cloudwatch => "AWS-CloudWatch-Metrics",
+    _ => "Standard-Stdout-Collector"
+  };
+
+  {
+    getSinkName: (): String => providerName,
+    flush: (): Unit => {
+      println(`  [${providerName}] 🧹 Vaciando buffer de telemetría a almacenamiento remoto...`);
+    },
+    dispatch: (event: IngestEvent): Result<String, String> => {
+      match event {
+        Metric { name, value, tags } => {
+          let tagCount = len(tags);
+          Ok(`[${providerName}] 📈 Métrica '${name}' = ${value} (con ${tagCount} tags asociados)`)
+        },
+        LogRecord { level, message, timestampMs } => {
+          Ok(`[${providerName}] 📝 Log [${level}] @ ${timestampMs}ms: "${message}"`)
+        },
+        SecurityAlert { threatLevel, sourceIp, ruleId } => {
+          match threatLevel {
+            :critical => Ok(`[${providerName}] 🚨 ALERTA CRÍTICA desde ${sourceIp} - Regla violada: ${ruleId}`),
+            _ => Ok(`[${providerName}] ⚠️ Alerta de seguridad moderada desde ${sourceIp} (${ruleId})`)
+          }
+        },
+        Heartbeat { serviceId, status } => {
+          Ok(`[${providerName}] 💓 Heartbeat de '${serviceId}' -> Estado: ${status}`)
+        }
+      }
+    }
+  }
+};
+
+// 4. Constructores Semánticos de Fábrica (Factory Constructors)
+export fn makeMetric(name: String, value: Float, tags: []String): IngestEvent =>
+  IngestEvent.Metric({ name: name, value: value, tags: tags });
+
+export fn makeLog(level: Atom, message: String, timestampMs: Int): IngestEvent =>
+  IngestEvent.LogRecord({ level: level, message: message, timestampMs: timestampMs });
+
+export fn makeSecurityAlert(threatLevel: Atom, sourceIp: String, ruleId: String): IngestEvent =>
+  IngestEvent.SecurityAlert({ threatLevel: threatLevel, sourceIp: sourceIp, ruleId: ruleId });
+
+export fn makeHeartbeat(serviceId: String, status: Atom): IngestEvent =>
+  IngestEvent.Heartbeat({ serviceId: serviceId, status: status });
+
+// 5. Fábrica Dinámica con soporte de Átomos
+export fn eventFactory(kind: Atom, identifier: String, extra: String): IngestEvent => {
+  match kind {
+    :metric => makeMetric(identifier, 100.0, ["env:prod", "cluster:aura-node-1"]),
+    :log => makeLog(:info, `${identifier}: ${extra}`, 1720000000),
+    :security => makeSecurityAlert(:critical, identifier, extra),
+    _ => makeHeartbeat(identifier, :ok)
+  }
+};
+
+// 6. Demostración y Ejecución
+export fn main(): Unit => {
+  println("==================================================");
+  println("  PATRÓN FACTORY METHOD v2 EN AURA LANG");
+  println("==================================================");
+
+  let sink = createTelemetrySink(:datadog);
+  defer sink.flush();
+
+  println(`Destino configurado: ${sink.getSinkName()}\n`);
+
+  // Creación estática usando constructores de fábrica
+  let tags: []String = ["region:us-east", "env:production", "tier:api"];
+  let m1 = makeMetric("http_requests_total", 4582.0, tags);
+  let l1 = makeLog(:warn, "Tiempo de respuesta del backend superó 350ms", 1720000100);
+  let s1 = makeSecurityAlert(:critical, "198.51.100.42", "SEC-SQL-INJECTION-ATTEMPT");
+  let h1 = makeHeartbeat("payment-service-auth", :degraded);
+
+  let events: []IngestEvent = [m1, l1, s1, h1];
+
+  for ev in events {
+    let res = sink.dispatch(ev);
+    match res {
+      Ok(msg) => println(`✓ ${msg}`),
+      Err(err) => println(`✕ Error al despachar: ${err}`)
+    };
+  }
+
+  // Creación dinámica mediante la fábrica genérica por átomo
+  println("\n--- Creación Dinámica mediante Átomo ---");
+  let dynMetric = eventFactory(:metric, "disk_iops_capacity", "");
+  let dynAlert = eventFactory(:security, "203.0.113.19", "SEC-DDOS-SYN-FLOOD");
+
+  match sink.dispatch(dynMetric) {
+    Ok(msg) => println(`✓ ${msg}`),
+    Err(e) => println(`✕ ${e}`)
+  };
+
+  match sink.dispatch(dynAlert) {
+    Ok(msg) => println(`✓ ${msg}`),
+    Err(e) => println(`✕ ${e}`)
+  };
+
+  println("\n✓ Factory Method v2 ejecutado exitosamente.");
+};

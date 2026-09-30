@@ -1,0 +1,209 @@
+// =============================================================================
+// Patrón de Diseño: Chain of Responsibility v2 (Pipeline Zero-Trust Interceptor)
+// =============================================================================
+// Propósito:
+//   Pasa una petición a lo largo de una cadena de manejadores/interceptores.
+//   Al recibir la petición, cada manejador decide si procesarla o pasarla al
+//   siguiente eslabón, abortando de forma temprana si las políticas fallan.
+//
+// Características de Aura Lang Destacadas:
+//   - Variables dinámicas (`DynamicVar.new`) para inyectar identidad y contexto sin taladrar.
+//   - Sentencia `defer` determinista para auditar la salida de cada eslabón en orden LIFO.
+//   - Sentencia `errdefer` para alarmas SOC automáticas cuando un eslabón rechaza la petición.
+//   - Átomos internados (:allow, :deny_auth, :deny_waf, :deny_quota) para códigos O(1).
+//   - Slices nativos estilo Go ([]String, len).
+//   - Duck Typing Estructural (interfaz SecurityInterceptor).
+// =============================================================================
+
+let PRINCIPAL_CLIENT_ID = DynamicVar.new("client-anon-000");
+
+// Estructuras de Petición y Respuesta
+export type HttpRequest = {
+  path: String,
+  ipAddress: String,
+  bearerToken: String,
+  payload: String,
+};
+
+export type HttpResponse = {
+  statusCode: Int,
+  statusAtom: Atom,
+  body: String,
+};
+
+// 1. Interfaz del Interceptor de Cadena (Duck Typing)
+export interface SecurityInterceptor {
+  getInterceptorName(): String;
+  handle(req: HttpRequest): Option<HttpResponse>;
+}
+
+// 2. Eslabón 1: WAF (Web Application Firewall) - Filtra inyecciones SQL / XSS
+export fn createWafInterceptor(): SecurityInterceptor => {
+  {
+    getInterceptorName: (): String => "1. WAF-Inspection",
+    handle: (req: HttpRequest): Option<HttpResponse> => {
+      defer println("     [1. WAF] << Salida de inspección WAF.");
+      errdefer println("     [1. WAF] 🚨 [ERRDEFER] Ataque detectado en payload. Notificando a SIEM.");
+
+      println("     [1. WAF] >> Verificando firmas maliciosas en payload...");
+      if (req.payload == "SELECT * FROM users; DROP TABLE") {
+        return Some({
+          statusCode: 403,
+          statusAtom: :deny_waf,
+          body: "WAF: Inyección SQL detectada y bloqueada en el borde."
+        });
+      }
+      None
+    }
+  }
+};
+
+// 3. Eslabón 2: Autenticación JWT / Bearer
+export fn createAuthInterceptor(): SecurityInterceptor => {
+  {
+    getInterceptorName: (): String => "2. Auth-Verifier",
+    handle: (req: HttpRequest): Option<HttpResponse> => {
+      defer println("     [2. Auth] << Salida de verificación de token.");
+      errdefer println("     [2. Auth] 🚨 [ERRDEFER] Intento de acceso sin credenciales válidas.");
+
+      println("     [2. Auth] >> Validando token Bearer...");
+      if (req.bearerToken == "") {
+        return Some({
+          statusCode: 401,
+          statusAtom: :deny_auth,
+          body: "Auth: Token Bearer ausente o malformado."
+        });
+      }
+      None
+    }
+  }
+};
+
+// 4. Eslabón 3: Rate Limiter por IP
+export fn createRateLimiterInterceptor(): SecurityInterceptor => {
+  {
+    getInterceptorName: (): String => "3. Rate-Limiter",
+    handle: (req: HttpRequest): Option<HttpResponse> => {
+      defer println("     [3. RateLimit] << Salida de control de tasa.");
+      println(`     [3. RateLimit] >> Comprobando cuota para IP: ${req.ipAddress}...`);
+      if (req.ipAddress == "198.51.100.99") {
+        return Some({
+          statusCode: 429,
+          statusAtom: :deny_quota,
+          body: "RateLimit: Cuota de peticiones por minuto superada."
+        });
+      }
+      None
+    }
+  }
+};
+
+// 5. Orquestador de la Cadena de Responsabilidad
+export fn processChain(interceptors: []SecurityInterceptor, req: HttpRequest): HttpResponse => {
+  let clientId = PRINCIPAL_CLIENT_ID.get();
+  println(`\n🚀 [CHAIN-RUNNER] Procesando petición '${req.path}' para cliente [${clientId}]:`);
+
+  let totalLinks = len(interceptors);
+  let mut i = 0;
+  while (i < totalLinks) {
+    let link = interceptors[i];
+    let resOpt = link.handle(req);
+    let mut blockedResp: Option<HttpResponse> = None;
+    match resOpt {
+      Some(errResp) => {
+        blockedResp = Some(errResp);
+      },
+      None => ()
+    };
+
+    if (blockedResp != None) {
+      let resp = match blockedResp {
+        Some(r) => r,
+        None => { statusCode: 500, statusAtom: :allow, body: "" }
+      };
+      println(`  🛑 Petición interceptada y rechazada por: ${link.getInterceptorName()} (HTTP ${resp.statusCode})`);
+      return resp;
+    }
+
+    println(`  ✓ ${link.getInterceptorName()} autorizó la petición.`);
+    i = i + 1;
+  }
+
+  // Si atravesó todos los eslabones sin ser interceptada, alcanza el Controlador Final
+  println("  🎯 [FINAL CONTROLLER] Petición atravesó toda la cadena de seguridad exitosamente.");
+  {
+    statusCode: 200,
+    statusAtom: :allow,
+    body: `OK: Recurso '${req.path}' procesado con éxito para ${clientId}`
+  }
+};
+
+// 6. Demostración y Ejecución
+export fn main(): Unit => {
+  println("==================================================");
+  println("  PATRÓN CHAIN OF RESPONSIBILITY v2 EN AURA LANG");
+  println("==================================================");
+
+  let waf = createWafInterceptor();
+  let auth = createAuthInterceptor();
+  let limiter = createRateLimiterInterceptor();
+
+  let securityChain: []SecurityInterceptor = [waf, auth, limiter];
+
+  // Caso 1: Petición Legítima (Atraviesa toda la cadena hasta el Endpoint final)
+  println("--- Caso 1: Petición Legítima de Administrador ---");
+  PRINCIPAL_CLIENT_ID.bind("client-admin-corp", fn(): Unit => {
+    let validReq: HttpRequest = {
+      path: "/api/v2/cluster/nodes",
+      ipAddress: "10.0.0.1",
+      bearerToken: "eyJh...valid-token",
+      payload: "{\"action\": \"scale\", \"replicas\": 5}"
+    };
+    let resp = processChain(securityChain, validReq);
+    println(`  Respuesta Final: HTTP ${resp.statusCode} [${resp.statusAtom}] -> ${resp.body}`);
+  });
+
+  // Caso 2: Petición con Inyección SQL (Rechazada en Eslabón 1: WAF)
+  println("\n--------------------------------------------------");
+  println("--- Caso 2: Ataque Malicioso bloqueado por WAF ---");
+  PRINCIPAL_CLIENT_ID.bind("client-malicious-attacker", fn(): Unit => {
+    let sqlInjReq: HttpRequest = {
+      path: "/api/v2/users",
+      ipAddress: "10.0.0.2",
+      bearerToken: "eyJh...valid-token",
+      payload: "SELECT * FROM users; DROP TABLE"
+    };
+    let resp = processChain(securityChain, sqlInjReq);
+    println(`  Respuesta Final: HTTP ${resp.statusCode} [${resp.statusAtom}] -> ${resp.body}`);
+  });
+
+  // Caso 3: Petición Sin Token Bearer (Rechazada en Eslabón 2: Auth)
+  println("\n--------------------------------------------------");
+  println("--- Caso 3: Petición sin credenciales rechazada por Auth ---");
+  PRINCIPAL_CLIENT_ID.bind("client-unauth-visitor", fn(): Unit => {
+    let noAuthReq: HttpRequest = {
+      path: "/api/v2/secrets",
+      ipAddress: "10.0.0.3",
+      bearerToken: "",
+      payload: "{\"secret\": \"vault-key\"}"
+    };
+    let resp = processChain(securityChain, noAuthReq);
+    println(`  Respuesta Final: HTTP ${resp.statusCode} [${resp.statusAtom}] -> ${resp.body}`);
+  });
+
+  // Caso 4: IP con cuota excedida (Rechazada en Eslabón 3: Rate Limiter)
+  println("\n--------------------------------------------------");
+  println("--- Caso 4: Petición que excede tasa de peticiones ---");
+  PRINCIPAL_CLIENT_ID.bind("client-spammer", fn(): Unit => {
+    let rateLimitReq: HttpRequest = {
+      path: "/api/v2/search",
+      ipAddress: "198.51.100.99",
+      bearerToken: "eyJh...valid-token",
+      payload: "q=query"
+    };
+    let resp = processChain(securityChain, rateLimitReq);
+    println(`  Respuesta Final: HTTP ${resp.statusCode} [${resp.statusAtom}] -> ${resp.body}`);
+  });
+
+  println("\n✓ Chain of Responsibility v2 ejecutado exitosamente.");
+};

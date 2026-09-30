@@ -1,0 +1,206 @@
+// =============================================================================
+// Patrón de Diseño: State v2 (Máquina de Estados de Consenso Distribuido Raft)
+// =============================================================================
+// Propósito:
+//   Permite que un nodo distribuido altere su comportamiento cuando su estado
+//   interno cambia, encapsulando cada estado con sus datos propios invariantes.
+//
+// En Aura:
+//   Los estados se modelan como variantes de un Tipo Suma Algebraico (ADT).
+//   A diferencia de POO donde cada estado muta variables globales desprotegidas,
+//   en Aura cada estado contiene estrictamente los campos válidos para esa fase,
+//   haciendo que los estados ilegales sean imposibles de representar.
+//
+// Características de Aura Lang Destacadas:
+//   - Tipos Suma Algebraicos (ADTs) con registros asociados.
+//   - Pattern Matching Exhaustivo verificado por el compilador.
+//   - Átomos internados (:timeout, :quorum_reached, :heartbeat_ok, :higher_term).
+//   - Sentencia `defer` determinista para registrar transiciones de estado.
+//   - Inmutabilidad por defecto en transiciones de estado.
+// =============================================================================
+
+// 1. ADT: Estados de un Nodo en Consenso Raft
+export type RaftState =
+  | Follower { term: Int, currentLeader: String }
+  | Candidate { term: Int, votesGranted: Int, totalNodes: Int }
+  | Leader { term: Int, heartbeatIntervalMs: Int, activeFollowers: Int };
+
+// 2. Interfaz del Nodo de Consenso (Duck Typing)
+export interface RaftNode {
+  getNodeId(): String;
+  getStateDescription(): String;
+  onElectionTimeout(): Result<String, String>;
+  onReceiveVote(fromNode: String): Result<String, String>;
+  onReceiveHeartbeat(fromLeader: String, leaderTerm: Int): Result<String, String>;
+}
+
+// 3. Implementación del Nodo con Máquina de Estados Finita Exhaustiva
+export fn createRaftNode(nodeId: String, totalClusterNodes: Int): RaftNode => {
+  let mut currentState: RaftState = RaftState.Follower({
+    term: 1,
+    currentLeader: "node-leader-alpha"
+  });
+
+  {
+    getNodeId: (): String => nodeId,
+
+    getStateDescription: (): String => {
+      match currentState {
+        Follower { term, currentLeader } =>
+          `[FOLLOWER] Término: ${term} | Siguiendo a Líder: '${currentLeader}'`,
+        Candidate { term, votesGranted, totalNodes } =>
+          `[CANDIDATE] Término: ${term} | Votos: ${votesGranted}/${totalNodes}`,
+        Leader { term, heartbeatIntervalMs, activeFollowers } =>
+          `[LEADER] Término: ${term} | Heartbeat: ${heartbeatIntervalMs}ms | Seguidores: ${activeFollowers}`
+      }
+    },
+
+    onElectionTimeout: (): Result<String, String> => {
+      defer println(`  [FSM-AUDIT] Evaluación de ElectionTimeout completada en nodo '${nodeId}'.`);
+
+      match currentState {
+        Follower { term, currentLeader } => {
+          let newTerm = term + 1;
+          currentState = RaftState.Candidate({
+            term: newTerm,
+            votesGranted: 1, // Voto propio por sí mismo
+            totalNodes: totalClusterNodes
+          });
+          Ok(`🔄 Transición: Follower -> Candidate (Nuevo Término: ${newTerm}, 1 voto inicial)`)
+        },
+        Candidate { term, votesGranted, totalNodes } => {
+          let newTerm = term + 1;
+          currentState = RaftState.Candidate({
+            term: newTerm,
+            votesGranted: 1,
+            totalNodes: totalClusterNodes
+          });
+          Ok(`🔄 Reinicio de Elección: Término incrementado a ${newTerm}`)
+        },
+        Leader { term, heartbeatIntervalMs, activeFollowers } => {
+          Err("Transición Inválida: Un líder activo no procesa timeouts de elección.")
+        }
+      }
+    },
+
+    onReceiveVote: (fromNode: String): Result<String, String> => {
+      match currentState {
+        Candidate { term, votesGranted, totalNodes } => {
+          let updatedVotes = votesGranted + 1;
+          let quorumThreshold = 3; // Mayoría simple estricta para 5 nodos (3 de 5)
+
+          if (updatedVotes >= quorumThreshold) {
+            // Se alcanzó el quórum de mayoría -> Ascenso a Leader
+            currentState = RaftState.Leader({
+              term: term,
+              heartbeatIntervalMs: 50,
+              activeFollowers: updatedVotes - 1
+            });
+            return Ok(`👑 ¡QUÓRUM ALCANZADO! (${updatedVotes}/${totalNodes}). Transición: Candidate -> LEADER (Término ${term})`);
+          } else {
+            currentState = RaftState.Candidate({
+              term: term,
+              votesGranted: updatedVotes,
+              totalNodes: totalNodes
+            });
+            return Ok(`🗳️ Voto recibido de '${fromNode}'. Votos acumulados: ${updatedVotes}/${totalNodes} (Requiere ${quorumThreshold})`);
+          }
+        },
+        Follower { term, currentLeader } => {
+          return Err("Transición Rechazada: Un nodo Follower no puede acumular votos para sí mismo.");
+        },
+        Leader { term, heartbeatIntervalMs, activeFollowers } => {
+          return Err("Transición Ignorada: El nodo ya es el Líder electo del clúster.");
+        }
+      }
+    },
+
+    onReceiveHeartbeat: (fromLeader: String, leaderTerm: Int): Result<String, String> => {
+      match currentState {
+        Leader { term, heartbeatIntervalMs, activeFollowers } => {
+          if (leaderTerm > term) {
+            // Si otro líder tiene un término mayor, este nodo debe degradarse a Follower
+            currentState = RaftState.Follower({
+              term: leaderTerm,
+              currentLeader: fromLeader
+            });
+            return Ok(`⚠️ Degeneración: Se detectó líder '${fromLeader}' con término superior (${leaderTerm} > ${term}). Transición: Leader -> FOLLOWER`);
+          } else {
+            return Err(`Rechazado heartbeat de '${fromLeader}': término inferior o duplicado.`);
+          }
+        },
+        Candidate { term, votesGranted, totalNodes } => {
+          if (leaderTerm >= term) {
+            currentState = RaftState.Follower({
+              term: leaderTerm,
+              currentLeader: fromLeader
+            });
+            return Ok(`Transición: Candidate -> Follower (Reconocido nuevo líder legítimo '${fromLeader}')`);
+          } else {
+            return Err("Rechazado heartbeat con término obsoleto.");
+          }
+        },
+        Follower { term, currentLeader } => {
+          currentState = RaftState.Follower({
+            term: leaderTerm,
+            currentLeader: fromLeader
+          });
+          return Ok(`💓 Heartbeat aceptado de líder '${fromLeader}' en término ${leaderTerm}. Temporizador reiniciado.`);
+        }
+      }
+    }
+  }
+};
+
+// 4. Demostración y Ejecución
+export fn main(): Unit => {
+  println("==================================================");
+  println("  PATRÓN STATE v2 EN AURA LANG");
+  println("==================================================");
+
+  let node = createRaftNode("raft-node-bravo", 5);
+
+  println(`1. Estado Inicial del Nodo:\n   ${node.getStateDescription()}\n`);
+
+  // Paso 1: Pérdida de heartbeat del líder -> Timeout de Elección
+  println("2. Simulación: Se pierde la conexión con el líder (Election Timeout):");
+  match node.onElectionTimeout() {
+    Ok(msg) => println(`   ✓ ${msg}`),
+    Err(e) => println(`   ✕ ${e}`)
+  };
+  println(`   Estado Actual: ${node.getStateDescription()}\n`);
+
+  // Paso 2: Recepción de votos de otros nodos
+  println("3. Simulación: Recibiendo votos de pares concurrentes:");
+  match node.onReceiveVote("raft-node-charlie") {
+    Ok(msg) => println(`   ✓ ${msg}`),
+    Err(e) => println(`   ✕ ${e}`)
+  };
+  println(`   Estado Actual: ${node.getStateDescription()}\n`);
+
+  // Paso 3: Recepción del voto que completa el Quórum (3/5)
+  println("4. Simulación: Recibiendo voto decisivo que otorga mayoría absoluta:");
+  match node.onReceiveVote("raft-node-delta") {
+    Ok(msg) => println(`   ✓ ${msg}`),
+    Err(e) => println(`   ✕ ${e}`)
+  };
+  println(`   Estado Actual: ${node.getStateDescription()}\n`);
+
+  // Paso 4: Verificación de Transición Ilegal prevenida por la FSM
+  println("5. Verificación de Transición Ilegal:");
+  println("   Un Líder intentando procesar un nuevo ElectionTimeout:");
+  match node.onElectionTimeout() {
+    Ok(_) => println("   ✕ Error: No debió permitir la transición"),
+    Err(err) => println(`   ✓ FSM bloqueó transición inválida: "${err}"`)
+  };
+
+  // Paso 5: Degeneración ante un líder con término superior
+  println("\n6. Simulación: Se descubre un líder legítimo con término superior (Term 4):");
+  match node.onReceiveHeartbeat("raft-node-omega", 4) {
+    Ok(msg) => println(`   ✓ ${msg}`),
+    Err(e) => println(`   ✕ ${e}`)
+  };
+  println(`   Estado Final: ${node.getStateDescription()}`);
+
+  println("\n✓ State v2 ejecutado exitosamente.");
+};

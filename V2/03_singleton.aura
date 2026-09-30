@@ -1,0 +1,153 @@
+// =============================================================================
+// Patrón de Diseño: Singleton v2 (Registro Global Seguro para Concurrencia)
+// =============================================================================
+// Propósito:
+//   Garantiza que un recurso posea una única instancia global compartida,
+//   proporcionando un punto de acceso atómico y seguro para múltiples fibers.
+//
+// Características de Aura Lang Destacadas:
+//   - Primitiva nativa `Once.new()` para inicialización perezosa atómica thread-safe.
+//   - `Mutex.new()` con garantía determinista LIFO mediante `defer mtx.unlock()`.
+//   - Variables dinámicas (`DynamicVar.new`) para propagar contexto de tenant/ambiente.
+//   - Átomos internados (:lru, :lfu, :fifo) para políticas de desalojo.
+//   - Fibras concurrentes M:N (`spawn`) y sincronización con `await wg.wait()`.
+//   - Slices nativos estilo Go ([]String, append, len).
+// =============================================================================
+
+// Variable dinámica para asociar el contexto del inquilino (Tenant) sin ensuciar firmas
+let TENANT_SCOPE = DynamicVar.new("default-tenant");
+
+// 1. Interfaz del Registro Singleton (Duck Typing)
+export interface CacheRegistry {
+  getEvictionPolicy(): Atom;
+  set(key: String, value: String): Unit;
+  get(key: String): Option<String>;
+  listKeys(): []String;
+}
+
+// Variables a nivel de módulo que encapsulan el estado único y los sincronizadores
+let once = Once.new();
+let mtx = Mutex.new();
+let mut cacheStore: Map<String, String> = Map.new();
+let mut trackedKeys: []String = [];
+let mut initCount: Int = 0;
+
+// 2. Función de Acceso al Singleton protegida con Once.new()
+export fn getGlobalCacheRegistry(): CacheRegistry => {
+  once.do(fn(): Unit => {
+    initCount = initCount + 1;
+    println("  [SINGLETON-INIT] ⚡ Inicializando instancia única del Registro de Caché...");
+    println("  [SINGLETON-INIT] ✓ Instancia creada con política :lru y exclusión mutua.");
+  });
+
+  {
+    getEvictionPolicy: (): Atom => :lru,
+
+    set: (key: String, value: String): Unit => {
+      mtx.lock();
+      defer mtx.unlock();
+
+      let tenant = TENANT_SCOPE.get();
+      let namespacedKey = `${tenant}:${key}`;
+      cacheStore.set(namespacedKey, value);
+      trackedKeys = append(trackedKeys, namespacedKey);
+    },
+
+    get: (key: String): Option<String> => {
+      mtx.lock();
+      defer mtx.unlock();
+
+      let tenant = TENANT_SCOPE.get();
+      let namespacedKey = `${tenant}:${key}`;
+      if (cacheStore.has(namespacedKey)) {
+        let val: String = cacheStore.get(namespacedKey);
+        return Some(val);
+      }
+      return None;
+    },
+
+    listKeys: (): []String => {
+      mtx.lock();
+      defer mtx.unlock();
+      trackedKeys
+    }
+  }
+};
+
+// 3. Demostración y Ejecución Concurrente
+export async fn main(): Task<Unit, String> => {
+  println("==================================================");
+  println("  PATRÓN SINGLETON v2 EN AURA LANG");
+  println("==================================================");
+
+  println("1. Disparando accesos concurrentes desde múltiples Fibers:\n");
+
+  let wg = WaitGroup.new();
+  wg.add(3);
+
+  // Fiber 1: Inquilino 'tenant-alpha'
+  spawn {
+    TENANT_SCOPE.bind("tenant-alpha", fn(): Unit => {
+      let reg = getGlobalCacheRegistry();
+      reg.set("session_token", "ALPHA-TOK-9988");
+      reg.set("user_role", "admin");
+    });
+    wg.done();
+  };
+
+  // Fiber 2: Inquilino 'tenant-beta'
+  spawn {
+    TENANT_SCOPE.bind("tenant-beta", fn(): Unit => {
+      let reg = getGlobalCacheRegistry();
+      reg.set("session_token", "BETA-TOK-1122");
+      reg.set("quota_limit", "5000");
+    });
+    wg.done();
+  };
+
+  // Fiber 3: Inquilino 'tenant-gamma'
+  spawn {
+    TENANT_SCOPE.bind("tenant-gamma", fn(): Unit => {
+      let reg = getGlobalCacheRegistry();
+      reg.set("api_key", "GAMMA-SECRET-KEY");
+    });
+    wg.done();
+  };
+
+  // Esperar a que todas las fibras completen sus escrituras concurrentes
+  await wg.wait();
+
+  println("\n2. Verificando consistencia del estado global único:");
+  let singleton = getGlobalCacheRegistry();
+  println(`  - Política de caché activa: ${singleton.getEvictionPolicy()}`);
+
+  let allKeys = singleton.listKeys();
+  println(`  - Total de claves registradas en el Singleton: ${len(allKeys)}`);
+
+  // Lectura con scopes dinámicos
+  TENANT_SCOPE.bind("tenant-alpha", fn(): Unit => {
+    let opt1: Option<String> = singleton.get("session_token");
+    match opt1 {
+      Some(tok) => println(`  - [tenant-alpha] session_token = ${tok}`),
+      None => println("  - [tenant-alpha] clave no encontrada")
+    };
+  });
+
+  TENANT_SCOPE.bind("tenant-beta", fn(): Unit => {
+    let opt2: Option<String> = singleton.get("session_token");
+    match opt2 {
+      Some(tok) => println(`  - [tenant-beta] session_token = ${tok}`),
+      None => println("  - [tenant-beta] clave no encontrada")
+    };
+  });
+
+  println("\n3. Verificación de Invariante Singleton:");
+  println(`  - Cantidad de inicializaciones ejecutadas: ${initCount}`);
+  if (initCount == 1) {
+    println("  ✓ ÉXITO: El Singleton solo fue inicializado 1 vez a pesar de la concurrencia.");
+  } else {
+    println("  ✕ FALLO: Se detectaron múltiples inicializaciones.");
+  }
+
+  println("\n✓ Singleton v2 ejecutado exitosamente.");
+};

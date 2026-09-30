@@ -1,0 +1,134 @@
+// =============================================================================
+// Patrón de Diseño: Adapter v2 (Adaptador de Disco de Bloques a Cloud Storage)
+// =============================================================================
+// Propósito:
+//   Convierte la interfaz de un subsistema heredado (dispositivo de bloques crudo)
+//   a una interfaz moderna esperada por los clientes (almacenamiento de objetos cloud).
+//
+// Características de Aura Lang Destacadas:
+//   - Packed Structs (export packed struct) para empaquetado binario de sectores.
+//   - Duck Typing Estructural: Implementación implícita de la interfaz `CloudObjectStorage`.
+//   - Sentencia `errdefer` para reversar transacciones de E/S en bajo nivel ante fallos.
+//   - Átomos internados (:hot_storage, :cold_archive, :synced) para metadatos O(1).
+//   - Slices nativos estilo Go ([]Int, len, rebanado payload[:4]).
+// =============================================================================
+
+// 1. Packed Struct: Estructura binaria de sector de bajo nivel
+export packed struct BlockSectorHeader {
+  magic: Uint16,
+  sector_id: Uint32,
+  block_size: Uint16,
+  flags: Uint8,
+};
+
+// 2. Interfaz Moderna Esperada por el Sistema (Target Interface)
+export interface CloudObjectStorage {
+  getStorageTier(): Atom;
+  putBlob(key: String, payload: []Int): Result<String, String>;
+  getBlob(key: String): Result<[]Int, String>;
+}
+
+// 3. Subsistema Heredado (Adaptee): Controlador de disco crudo UNIX
+export type RawDiskDevice = {
+  deviceName: String,
+  sectors: Map<String, []Int>,
+  headers: Map<String, BlockSectorHeader>,
+};
+
+export fn newRawDiskDevice(name: String): RawDiskDevice => {
+  {
+    deviceName: name,
+    sectors: Map.new(),
+    headers: Map.new(),
+  }
+};
+
+// 4. Adaptador Estructural (Adapter): Adapta RawDiskDevice a CloudObjectStorage
+export fn createDiskToCloudAdapter(device: RawDiskDevice, tier: Atom): CloudObjectStorage => {
+  let mut currentDevice = device;
+
+  {
+    getStorageTier: (): Atom => tier,
+
+    putBlob: (key: String, payload: []Int): Result<String, String> => {
+      // errdefer: si ocurre un fallo al escribir bloques, se revierte el sector
+      errdefer println(`  [ERRDEFER] ⚠️ Error de paridad en bloque '${key}'. Descartando sector.`);
+
+      let payloadSize = len(payload);
+      if (payloadSize == 0) {
+        return Err("El payload no puede estar vacío.");
+      }
+
+      // Generar cabecera binaria empaquetada
+      let header: BlockSectorHeader = {
+        magic: 4242,       // Magic number 0x1092
+        sector_id: 1048576, // Sector offset LBA
+        block_size: 512,
+        flags: 1,          // Flag: written
+      };
+
+      currentDevice.headers.set(key, header);
+      currentDevice.sectors.set(key, payload);
+
+      Ok(`Almacenado objeto '${key}' (${payloadSize} bytes) en ${device.deviceName} con sector binario #${header.sector_id}`)
+    },
+
+    getBlob: (key: String): Result<[]Int, String> => {
+      if (!currentDevice.sectors.has(key)) {
+        return Err(`Bloque clave '${key}' no encontrado en el dispositivo crudo.`);
+      }
+
+      let data: []Int = currentDevice.sectors.get(key);
+      Ok(data)
+    }
+  }
+};
+
+// 5. Demostración y Ejecución
+export fn main(): Unit => {
+  println("==================================================");
+  println("  PATRÓN ADAPTER v2 EN AURA LANG");
+  println("==================================================");
+
+  // Instanciamos el subsistema de bajo nivel
+  let legacyDevice = newRawDiskDevice("/dev/nvme0n1p2");
+  println(`1. Dispositivo heredado inicializado: ${legacyDevice.deviceName}`);
+
+  // Creamos el adaptador que satisface la interfaz moderna CloudObjectStorage
+  let storage: CloudObjectStorage = createDiskToCloudAdapter(legacyDevice, :hot_storage);
+  println(`2. Adaptador conectado. Nivel de almacenamiento: ${storage.getStorageTier()}\n`);
+
+  // Caso 1: Escritura exitosa a través de la interfaz de objetos
+  println("3. Escritura de objeto estructurado mediante Cloud API:");
+  let binaryData: []Int = [120, 156, 243, 72, 205, 201, 201, 87, 8, 207, 47, 202, 73, 81, 4, 0];
+  println(`   Bytes a escribir: len = ${len(binaryData)}, primeros 4 = [${binaryData[0]}, ${binaryData[1]}, ${binaryData[2]}, ${binaryData[3]}]`);
+
+  let writeResult = storage.putBlob("snapshots/daily-backup.tar.gz", binaryData);
+  match writeResult {
+    Ok(info) => println(`   ✓ ${info}`),
+    Err(err) => println(`   ✕ Error: ${err}`)
+  };
+
+  // Caso 2: Lectura mediante la interfaz adaptada
+  println("\n4. Lectura y rebanado (slicing) del objeto recuperado:");
+  let readResult = storage.getBlob("snapshots/daily-backup.tar.gz");
+  match readResult {
+    Ok(bytes) => {
+      println(`   ✓ Leídos ${len(bytes)} bytes desde el adaptador de bloques.`);
+      let magicSlice = bytes[0:4];
+      println(`   ✓ Rebanado bytes[0:4]: [${magicSlice[0]}, ${magicSlice[1]}, ${magicSlice[2]}, ${magicSlice[3]}]`);
+    },
+    Err(e) => println(`   ✕ Error de lectura: ${e}`)
+  };
+
+  // Caso 3: Fallo de validación que activa errdefer
+  println("\n5. Intento de escritura con payload vacío (debe disparar errdefer):");
+  let emptyData: []Int = [];
+  let failResult = storage.putBlob("invalid/empty.bin", emptyData);
+  match failResult {
+    Ok(_) => println("   ✕ No debió escribir"),
+    Err(msg) => println(`   ✓ Rechazado correctamente: "${msg}"`)
+  };
+
+  println("\n✓ Adapter v2 ejecutado exitosamente.");
+};
