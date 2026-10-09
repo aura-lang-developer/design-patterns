@@ -1,0 +1,257 @@
+// =============================================================================
+// Patrón de Diseño: Chain of Responsibility v3 (Estilo Idiomático Golang)
+// =============================================================================
+// Propósito:
+//   Permite pasar peticiones a lo largo de una cadena de manejadores. Cada eslabón
+//   decide si procesa la petición o la delega al siguiente eslabón, permitiendo
+//   cortocircuito temprano (e.g., rechazos 401, 429 o 400).
+//
+// Enfoque Golang en Aura Lang:
+//   - Interfaz `HttpHandler` (Duck Typing Estructural): define `Handle()` y `SetNext()`.
+//   - Middleware al estilo `net/http` de Go con encadenamiento explícito:
+//     `AuthMiddleware` -> `RateLimitMiddleware` -> `ValidationMiddleware` -> `EndpointHandler`.
+//   - Retorno temprano de respuestas HTTP con códigos de estado sin alcanzar el handler final.
+//   - Sentencia `defer` para tracing y observabilidad de salida de cada eslabón.
+// =============================================================================
+
+// 1. Tipos de Dominio de Petición y Respuesta HTTP
+export struct HttpRequest {
+  path: String,
+  authToken: String,
+  clientIp: String,
+  body: String
+};
+
+export struct HttpResponse {
+  statusCode: Int,
+  body: String
+};
+
+// 2. Interfaz Común del Manejador en la Cadena (Duck Typing)
+export interface HttpHandler {
+  Handle(req: HttpRequest): HttpResponse;
+  SetNext(next: HttpHandler): HttpHandler;
+  Name(): String;
+}
+
+// 3. Eslabón 1: Autenticación (AuthMiddleware)
+export struct AuthMiddleware {
+  __aura_type: String,
+  next: Option<HttpHandler>
+};
+
+export fn NewAuthMiddleware(): AuthMiddleware => {
+  return {
+    __aura_type: "AuthMiddleware",
+    next: None
+  };
+};
+
+fn (h: AuthMiddleware) Name(): String => "AuthMiddleware";
+
+fn (h: AuthMiddleware) SetNext(nextHandler: HttpHandler): HttpHandler => {
+  h.next = Some(nextHandler);
+  nextHandler
+}
+
+fn (h: AuthMiddleware) Handle(req: HttpRequest): HttpResponse => {
+  println("   [1. AuthMiddleware] Verificando credenciales Bearer...");
+  defer println("   [1. AuthMiddleware] Finalizada inspección de token.");
+
+  if (req.authToken == "") {
+    println("   ✕ [1. AuthMiddleware] Token ausente. Cortocircuito 401 Unauthorized.");
+    return {
+      statusCode: 401,
+      body: `{"error":"Missing Authorization Bearer token"}`
+    };
+  }
+
+  if (!req.authToken.startsWith("bearer_sec_")) {
+    println("   ✕ [1. AuthMiddleware] Token con formato o firma inválida. Cortocircuito 403 Forbidden.");
+    return {
+      statusCode: 403,
+      body: `{"error":"Invalid authentication token signature"}`
+    };
+  }
+
+  println("   ✓ [1. AuthMiddleware] Token válido. Delegando al siguiente eslabón...");
+  match h.next {
+    Some(nxt) => nxt.Handle(req),
+    None => { statusCode: 500, body: "Error: Fin inesperado de la cadena" }
+  }
+}
+
+// 4. Eslabón 2: Límite de Tasa de Peticiones (RateLimitMiddleware)
+export struct RateLimitMiddleware {
+  __aura_type: String,
+  next: Option<HttpHandler>,
+  blockedSubnet: String
+};
+
+export fn NewRateLimitMiddleware(blockedIp: String): RateLimitMiddleware => {
+  return {
+    __aura_type: "RateLimitMiddleware",
+    next: None,
+    blockedSubnet: blockedIp
+  };
+};
+
+fn (h: RateLimitMiddleware) Name(): String => "RateLimitMiddleware";
+
+fn (h: RateLimitMiddleware) SetNext(nextHandler: HttpHandler): HttpHandler => {
+  h.next = Some(nextHandler);
+  nextHandler
+}
+
+fn (h: RateLimitMiddleware) Handle(req: HttpRequest): HttpResponse => {
+  println(`   [2. RateLimiter] Evaluando cuota de peticiones para IP: ${req.clientIp}...`);
+  defer println("   [2. RateLimiter] Cuota verificada.");
+
+  if (req.clientIp == h.blockedSubnet) {
+    println(`   ✕ [2. RateLimiter] IP ${req.clientIp} excedió el límite. Cortocircuito 429 Too Many Requests.`);
+    return {
+      statusCode: 429,
+      body: `{"error":"Rate limit exceeded for client IP"}`
+    };
+  }
+
+  println("   ✓ [2. RateLimiter] Petición dentro de la cuota. Delegando...");
+  match h.next {
+    Some(nxt) => nxt.Handle(req),
+    None => { statusCode: 500, body: "Error: Fin inesperado de la cadena" }
+  }
+}
+
+// 5. Eslabón 3: Validación del Cuerpo (ValidationMiddleware)
+export struct ValidationMiddleware {
+  __aura_type: String,
+  next: Option<HttpHandler>
+};
+
+export fn NewValidationMiddleware(): ValidationMiddleware => {
+  return {
+    __aura_type: "ValidationMiddleware",
+    next: None
+  };
+};
+
+fn (h: ValidationMiddleware) Name(): String => "ValidationMiddleware";
+
+fn (h: ValidationMiddleware) SetNext(nextHandler: HttpHandler): HttpHandler => {
+  h.next = Some(nextHandler);
+  nextHandler
+}
+
+fn (h: ValidationMiddleware) Handle(req: HttpRequest): HttpResponse => {
+  println("   [3. Validator] Validando integridad del payload...");
+  defer println("   [3. Validator] Validación de estructura finalizada.");
+
+  if (req.body == "") {
+    println("   ✕ [3. Validator] Body vacío. Cortocircuito 400 Bad Request.");
+    return {
+      statusCode: 400,
+      body: `{"error":"Request body cannot be empty"}`
+    };
+  }
+
+  println("   ✓ [3. Validator] Body válido. Pasando al endpoint final...");
+  match h.next {
+    Some(nxt) => nxt.Handle(req),
+    None => { statusCode: 500, body: "Error: Fin inesperado de la cadena" }
+  }
+}
+
+// 6. Eslabón Final: Manejador del Endpoint de Negocio (BusinessEndpointHandler)
+export struct BusinessEndpointHandler {
+  __aura_type: String,
+  next: Option<HttpHandler>
+};
+
+export fn NewBusinessEndpointHandler(): BusinessEndpointHandler => {
+  return {
+    __aura_type: "BusinessEndpointHandler",
+    next: None
+  };
+};
+
+fn (h: BusinessEndpointHandler) Name(): String => "BusinessEndpointHandler";
+
+fn (h: BusinessEndpointHandler) SetNext(nextHandler: HttpHandler): HttpHandler => {
+  h.next = Some(nextHandler);
+  nextHandler
+}
+
+fn (h: BusinessEndpointHandler) Handle(req: HttpRequest): HttpResponse => {
+  println(`   🎯 [4. Endpoint] Procesando lógica central en ruta '${req.path}'...`);
+  {
+    statusCode: 200,
+    body: `{"status":"OK","path":"${req.path}","message":"Transacción completada exitosamente"}`
+  }
+}
+
+// 7. Punto de Entrada Principal
+export fn main(): Unit => {
+  println("==================================================");
+  println("  PATRÓN CHAIN OF RESPONSIBILITY v3 (ESTILO GOLANG)");
+  println("==================================================");
+
+  // Construcción e interconexión de la cadena de middlewares
+  let auth = NewAuthMiddleware();
+  let rateLimiter = NewRateLimitMiddleware("192.168.1.99");
+  let validator = NewValidationMiddleware();
+  let endpoint = NewBusinessEndpointHandler();
+
+  auth.SetNext(rateLimiter);
+  rateLimiter.SetNext(validator);
+  validator.SetNext(endpoint);
+
+  let chain: HttpHandler = auth;
+
+  // A. Petición 1: Válida y autorizada (Atraviesa toda la cadena hasta 200 OK)
+  println("\n--- Caso 1: Petición Válida Completa ---");
+  let reqSuccess: HttpRequest = {
+    path: "/api/v1/orders",
+    authToken: "bearer_sec_token_94821",
+    clientIp: "10.0.0.15",
+    body: `{"itemId":"AURA-BOOK","qty":1}`
+  };
+  let res1 = chain.Handle(reqSuccess);
+  println(`Resultado Caso 1 -> HTTP ${res1.statusCode}: ${res1.body}`);
+
+  // B. Petición 2: Sin credenciales (Abortada inmediatamente en Auth con 401)
+  println("\n--- Caso 2: Petición Sin Token de Autenticación ---");
+  let reqNoAuth: HttpRequest = {
+    path: "/api/v1/orders",
+    authToken: "",
+    clientIp: "10.0.0.15",
+    body: `{"itemId":"AURA-BOOK","qty":1}`
+  };
+  let res2 = chain.Handle(reqNoAuth);
+  println(`Resultado Caso 2 -> HTTP ${res2.statusCode}: ${res2.body}`);
+
+  // C. Petición 3: IP Bloqueada por Rate Limiting (Abortada en RateLimiter con 429)
+  println("\n--- Caso 3: Petición desde IP Bloqueada por Rate Limiting ---");
+  let reqRateLimited: HttpRequest = {
+    path: "/api/v1/orders",
+    authToken: "bearer_sec_valid_token",
+    clientIp: "192.168.1.99",
+    body: `{"itemId":"AURA-BOOK","qty":1}`
+  };
+  let res3 = chain.Handle(reqRateLimited);
+  println(`Resultado Caso 3 -> HTTP ${res3.statusCode}: ${res3.body}`);
+
+  // D. Petición 4: Body Vacío (Supera Auth y RateLimit, aborta en Validator con 400)
+  println("\n--- Caso 4: Petición con Body Vacío ---");
+  let reqEmptyBody: HttpRequest = {
+    path: "/api/v1/orders",
+    authToken: "bearer_sec_valid_token",
+    clientIp: "10.0.0.50",
+    body: ""
+  };
+  let res4 = chain.Handle(reqEmptyBody);
+  println(`Resultado Caso 4 -> HTTP ${res4.statusCode}: ${res4.body}`);
+
+  println("\n==================================================");
+  println("  ✓ Chain of Responsibility v3 completado.");
+  println("==================================================");
+};

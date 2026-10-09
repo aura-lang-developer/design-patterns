@@ -1,0 +1,141 @@
+// =============================================================================
+// Patrón de Diseño: Observer / Pub-Sub v3 (Estilo Idiomático Golang)
+// =============================================================================
+// Propósito:
+//   Define una dependencia uno-a-muchos entre objetos para que cuando un estado cambie,
+//   todos sus observadores sean notificados de forma asíncrona y desacoplada.
+//
+// Enfoque Golang en Aura Lang:
+//   - Concurrencia CSP: Canales tipados (`Channel<Event>`) y tareas concurrentes (`spawn`).
+//   - Estructura `EventBus` con `Mutex` y `defer b.mu.unlock()` para suscripción y publicación thread-safe.
+//   - Los observadores se ejecutan de forma independiente en tareas concurrentes en segundo plano,
+//     consumiendo eventos mediante el operador de recepción `<-ch`.
+//   - Sincronización y espera con `WaitGroup` (`wg.add`, `wg.done`, `await wg.wait()`).
+// =============================================================================
+
+// 1. Estructura del Evento de Dominio
+export struct Event {
+  id: String,
+  topic: String,
+  payload: String,
+  source: String
+};
+
+// 2. Estructura del Bus de Eventos Concurrente (EventBus)
+export struct EventBus {
+  subscribers: []Channel<Event>,
+  mu: Mutex
+};
+
+export fn NewEventBus(): EventBus => {
+  let emptyList: []Channel<Event> = [];
+  {
+    subscribers: emptyList,
+    mu: Mutex.new()
+  }
+};
+
+// 3. Métodos con Receptor para el Bus
+fn (b: *EventBus) Subscribe(bufferSize: Int): Channel<Event> => {
+  b.mu.lock();
+  defer b.mu.unlock();
+
+  let ch = Channel.make<Event>(bufferSize);
+  b.subscribers = append(b.subscribers, ch);
+  ch
+}
+
+fn (b: *EventBus) Publish(event: Event): Unit => {
+  b.mu.lock();
+  defer b.mu.unlock();
+
+  println(`📢 [EVENT-BUS] Publicando evento #${event.id} en tópico '${event.topic}'...`);
+  for ch in b.subscribers {
+    ch <- event;
+  }
+}
+
+// 4. Observadores Concretos ejecutados concurrentemente
+
+fn startEmailNotifier(ch: Channel<Event>, wg: WaitGroup): Unit => {
+  spawn {
+    let msg = <-ch;
+    match msg {
+      Some(ev) => {
+        println(`   📧 [OBSERVER: Email] Notificación despachada para #${ev.id} -> "${ev.payload}"`);
+      },
+      None => ()
+    };
+    wg.done();
+  };
+}
+
+fn startAnalyticsEngine(ch: Channel<Event>, wg: WaitGroup): Unit => {
+  spawn {
+    let msg = <-ch;
+    match msg {
+      Some(ev) => {
+        println(`   📊 [OBSERVER: Analytics] Métrica indexada: tópico '${ev.topic}' origen '${ev.source}'`);
+      },
+      None => ()
+    };
+    wg.done();
+  };
+}
+
+fn startAuditLogger(ch: Channel<Event>, wg: WaitGroup): Unit => {
+  spawn {
+    let msg = <-ch;
+    match msg {
+      Some(ev) => {
+        println(`   🔒 [OBSERVER: Audit] Registro inmutable generado para evento #${ev.id}`);
+      },
+      None => ()
+    };
+    wg.done();
+  };
+}
+
+// 5. Punto de Entrada Principal Concurrente
+export async fn main(): Task<Unit, String> => {
+  println("==================================================");
+  println("  PATRÓN OBSERVER (PUB-SUB CSP) v3 (ESTILO GOLANG)");
+  println("==================================================");
+
+  let mut bus = NewEventBus();
+  let pBus = &bus;
+
+  let wg = WaitGroup.new();
+  wg.add(3);
+
+  // 1. Suscripción de los 3 observadores al bus
+  println("1. Suscribiendo 3 observadores concurrentes (Fibers CSP)...");
+  let emailCh = pBus.Subscribe(5);
+  let analyticsCh = pBus.Subscribe(5);
+  let auditCh = pBus.Subscribe(5);
+
+  // 2. Inicio de los observadores concurrentes
+  startEmailNotifier(emailCh, wg);
+  startAnalyticsEngine(analyticsCh, wg);
+  startAuditLogger(auditCh, wg);
+
+  // 3. Publicación concurrente de evento
+  println("\n2. Emitiendo evento de dominio a través del Bus:");
+
+  let event1: Event = {
+    id: "EVT-101",
+    topic: "user.registered",
+    payload: "Nuevo usuario linus@aura-lang.org activado",
+    source: "auth-service"
+  };
+
+  pBus.Publish(event1);
+
+  // 4. Sincronización y espera de todos los observadores
+  println("\n3. Sincronizando observadores con WaitGroup...");
+  await wg.wait();
+
+  println("\n==================================================");
+  println("  ✓ Observer / Pub-Sub v3 completado con éxito.");
+  println("==================================================");
+};

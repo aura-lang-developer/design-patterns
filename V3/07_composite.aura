@@ -1,0 +1,139 @@
+// =============================================================================
+// Patrón de Diseño: Composite v3 (Estilo Idiomático Golang)
+// =============================================================================
+// Propósito:
+//   Compone objetos en estructuras de árbol para representar jerarquías
+//   parte-todo, permitiendo a los clientes tratar nodos individuales y ramas
+//   compuestas de manera completamente uniforme.
+//
+// Enfoque Golang en Aura Lang:
+//   - Interfaz `FileSystemEntry` que define las operaciones polimórficas uniformes.
+//   - Hoja (`FileItem`) y Nodo Compuesto (`DirectoryItem`).
+//   - Slices nativos (`[]FileSystemEntry`) en el compuesto para contener hijos.
+//   - Método `Add(entry: FileSystemEntry)` con receptor de puntero `*DirectoryItem`.
+//   - Recorrido recursivo uniforme de árboles para cálculo de tamaño, conteo e impresión.
+// =============================================================================
+
+// 1. Interfaz Común del Componente (Duck Typing)
+export interface FileSystemEntry {
+  GetName(): String;
+  GetSizeKb(): Int;
+  CountFiles(): Int;
+  Render(indent: String): Unit;
+}
+
+// 2. Nodo Hoja (Leaf): Archivo Individual
+export struct FileItem {
+  __aura_type: String,
+  name: String,
+  sizeKb: Int,
+  extension: String
+};
+
+export fn NewFileItem(name: String, sizeKb: Int, ext: String): FileItem => {
+  {
+    __aura_type: "FileItem",
+    name: name,
+    sizeKb: sizeKb,
+    extension: ext
+  }
+};
+
+fn (f: FileItem) GetName(): String => `${f.name}.${f.extension}`;
+
+fn (f: FileItem) GetSizeKb(): Int => f.sizeKb;
+
+fn (f: FileItem) CountFiles(): Int => 1;
+
+fn (f: FileItem) Render(indent: String): Unit => {
+  println(`${indent}📄 [FILE] ${f.name}.${f.extension} (${f.sizeKb} KB)`);
+}
+
+// 3. Nodo Compuesto (Composite): Directorio Contenedor
+export struct DirectoryItem {
+  __aura_type: String,
+  name: String,
+  children: []FileSystemEntry
+};
+
+export fn NewDirectoryItem(name: String): DirectoryItem => {
+  let emptyList: []FileSystemEntry = [];
+  {
+    __aura_type: "DirectoryItem",
+    name: name,
+    children: emptyList
+  }
+};
+
+fn (d: DirectoryItem) GetName(): String => `${d.name}/`;
+
+fn (d: *DirectoryItem) Add(child: FileSystemEntry): Unit => {
+  d.children = append(d.children, child);
+}
+
+fn (d: DirectoryItem) GetSizeKb(): Int => {
+  let mut total = 0;
+  for child in d.children {
+    total = total + child.GetSizeKb();
+  }
+  return total;
+}
+
+fn (d: DirectoryItem) CountFiles(): Int => {
+  let mut count = 0;
+  for child in d.children {
+    count = count + child.CountFiles();
+  }
+  return count;
+}
+
+fn (d: DirectoryItem) Render(indent: String): Unit => {
+  println(`${indent}📁 [DIR] ${d.name}/ (Archivos: ${d.CountFiles()}, Tamaño: ${d.GetSizeKb()} KB)`);
+  for child in d.children {
+    child.Render(`${indent}   ├── `);
+  }
+}
+
+// 4. Punto de Entrada Principal
+export fn main(): Unit => {
+  println("==================================================");
+  println("  PATRÓN COMPOSITE v3 (ESTILO GOLANG)");
+  println("==================================================");
+
+  // A. Construcción del Árbol Jerárquico
+  let mut rootDir = NewDirectoryItem("workspace");
+  let pRoot = &rootDir;
+
+  // Subdirectorio src
+  let mut srcDir = NewDirectoryItem("src");
+  let pSrc = &srcDir;
+  pSrc.Add(NewFileItem("main", 14, "aura"));
+  pSrc.Add(NewFileItem("config", 8, "aura"));
+  pSrc.Add(NewFileItem("utils", 12, "aura"));
+
+  // Subdirectorio assets
+  let mut assetsDir = NewDirectoryItem("assets");
+  let pAssets = &assetsDir;
+  pAssets.Add(NewFileItem("logo", 256, "png"));
+  pAssets.Add(NewFileItem("banner", 512, "webp"));
+
+  // Ensamblaje en la raíz
+  pRoot.Add(srcDir);
+  pRoot.Add(assetsDir);
+  pRoot.Add(NewFileItem("README", 6, "md"));
+  pRoot.Add(NewFileItem("aura", 2, "toml"));
+
+  // B. Tratamiento uniforme mediante la interfaz FileSystemEntry
+  let rootEntry: FileSystemEntry = rootDir;
+
+  println("1. Renderizado de la estructura jerárquica:");
+  rootEntry.Render("");
+
+  println("\n2. Métricas consolidadas calculadas uniformemente:");
+  println(`   ✓ Tamaño total acumulado: ${rootEntry.GetSizeKb()} KB`);
+  println(`   ✓ Total de archivos regulares: ${rootEntry.CountFiles()}`);
+
+  println("\n==================================================");
+  println("  ✓ Composite v3 completado exitosamente.");
+  println("==================================================");
+};

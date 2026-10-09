@@ -1,0 +1,262 @@
+// =============================================================================
+// Patrón de Diseño: Dependency Injection & IoC v3 (Estilo Idiomático Golang)
+// =============================================================================
+// Propósito:
+//   Desacopla la lógica de negocio central de sus dependencias de infraestructura
+//   (persistencia, notificaciones, métricas), permitiendo testabilidad con Mocks
+//   y adhesión al principio fundamental de Go: "Acepta interfaces, retorna structs".
+//
+// Enfoque Golang en Aura Lang:
+//   - Pure DI (Inyección de Dependencias por Constructor).
+//   - Duck Typing Estructural: `UserRepository`, `Notifier`, `MetricsLogger`.
+//   - Estructura central `UserService` que recibe interfaces en su constructor `NewUserService()`.
+//   - Implementaciones concretas de producción (`InMemoryUserRepository`, `EmailNotifier`, `PrometheusMetricsLogger`).
+//   - Implementación de prueba (`MockUserRepository`) demostrando pruebas unitarias sin dependencias reales.
+//   - Composition Root centralizado en `main()`.
+// =============================================================================
+
+// 1. Modelos de Dominio Puros
+export struct User {
+  id: String,
+  name: String,
+  email: String,
+  role: String
+};
+
+// 2. Abstracciones / Puertos del Dominio (Go-Style Duck Typing Interfaces)
+export interface UserRepository {
+  FindById(id: String): Result<User, String>;
+  Save(user: User): Result<Unit, String>;
+  Count(): Int;
+}
+
+export interface Notifier {
+  SendWelcome(email: String, name: String): Result<Unit, String>;
+}
+
+export interface MetricsLogger {
+  RecordMetric(metricName: String, label: String): Unit;
+}
+
+// 3. Implementación de Infraestructura 1: Repositorio en Memoria
+export struct InMemoryUserRepository {
+  __aura_type: String,
+  users: []User,
+  mu: Mutex
+};
+
+export fn NewInMemoryUserRepository(): InMemoryUserRepository => {
+  let emptyList: []User = [];
+  return {
+    __aura_type: "InMemoryUserRepository",
+    users: emptyList,
+    mu: Mutex.new()
+  };
+};
+
+fn (r: InMemoryUserRepository) Count(): Int => {
+  r.mu.lock();
+  defer r.mu.unlock();
+  len(r.users)
+}
+
+fn (r: InMemoryUserRepository) FindById(id: String): Result<User, String> => {
+  r.mu.lock();
+  defer r.mu.unlock();
+
+  for u in r.users {
+    if (u.id == id) {
+      return Ok(u);
+    }
+  }
+  Err(`Usuario con ID '${id}' no encontrado en base de datos`)
+}
+
+fn (r: InMemoryUserRepository) Save(user: User): Result<Unit, String> => {
+  r.mu.lock();
+  defer r.mu.unlock();
+
+  for u in r.users {
+    if (u.id == user.id || u.email == user.email) {
+      return Err(`Conflicto de unicidad: Usuario ya existe (ID: ${user.id})`);
+    }
+  }
+
+  r.users = append(r.users, user);
+  println(`      💾 [DB-Repo] Usuario '${user.name}' persistido exitosamente.`);
+  Ok(())
+}
+
+// 4. Implementación de Infraestructura 2: Notificador por Email
+export struct EmailNotifier {
+  __aura_type: String,
+  senderDomain: String
+};
+
+export fn NewEmailNotifier(domain: String): EmailNotifier => {
+  return {
+    __aura_type: "EmailNotifier",
+    senderDomain: domain
+  };
+};
+
+fn (n: EmailNotifier) SendWelcome(email: String, name: String): Result<Unit, String> => {
+  println(`      ✉️ [EmailNotifier @ ${n.senderDomain}] Correo de bienvenida enviado a ${name} <${email}>`);
+  Ok(())
+}
+
+// 5. Implementación de Infraestructura 3: Métricas Prometheus
+export struct PrometheusMetricsLogger {
+  __aura_type: String,
+  subsystem: String
+};
+
+export fn NewPrometheusMetricsLogger(subsys: String): PrometheusMetricsLogger => {
+  return {
+    __aura_type: "PrometheusMetricsLogger",
+    subsystem: subsys
+  };
+};
+
+fn (m: PrometheusMetricsLogger) RecordMetric(metricName: String, label: String): Unit => {
+  println(`      📈 [Prometheus @ ${m.subsystem}] Métrica registrada: ${metricName}{tag="${label}"} +1`);
+}
+
+// 6. Implementación de Prueba: Mock UserRepository para Testing
+export struct MockUserRepository {
+  __aura_type: String,
+  mockStore: []User
+};
+
+export fn NewMockUserRepository(): MockUserRepository => {
+  let emptyList: []User = [];
+  return {
+    __aura_type: "MockUserRepository",
+    mockStore: emptyList
+  };
+};
+
+fn (m: MockUserRepository) Count(): Int => len(m.mockStore);
+
+fn (m: MockUserRepository) FindById(id: String): Result<User, String> => {
+  for u in m.mockStore {
+    if (u.id == id) {
+      return Ok(u);
+    }
+  }
+  Err(`Mock: User '${id}' not found`)
+}
+
+fn (m: MockUserRepository) Save(user: User): Result<Unit, String> => {
+  m.mockStore = append(m.mockStore, user);
+  println(`      🧪 [MOCK-Repo] Simulación de guardado exitoso para: ${user.name}`);
+  Ok(())
+}
+
+// 7. Servicio de Dominio Central (Acepta Interfaces en su Constructor)
+export struct UserService {
+  repo: UserRepository,
+  notifier: Notifier,
+  metrics: MetricsLogger
+};
+
+export fn NewUserService(r: UserRepository, n: Notifier, m: MetricsLogger): UserService => {
+  return {
+    repo: r,
+    notifier: n,
+    metrics: m
+  };
+};
+
+fn (s: UserService) RegisterUser(id: String, name: String, email: String, role: String): Result<User, String> => {
+  println(`\n[UserService] >> Procesando registro de nuevo usuario: ${name} (${email})...`);
+
+  if (name == "" || email == "") {
+    return Err("Validación fallida: Nombre y email son requeridos");
+  }
+
+  let newUser: User = {
+    id: id,
+    name: name,
+    email: email,
+    role: role
+  };
+
+  // 1. Guardar en repositorio inyectado
+  let saveRes = s.repo.Save(newUser);
+  match saveRes {
+    Err(e) => Err(e),
+    Ok(_) => {
+      // 2. Emitir notificación inyectada
+      let notifRes = s.notifier.SendWelcome(email, name);
+      match notifRes {
+        Ok(_) => (),
+        Err(e) => println(`⚠️ Alerta: Falló notificación: ${e}`)
+      };
+
+      // 3. Registrar métrica inyectada
+      s.metrics.RecordMetric("user_registered_total", role);
+
+      println(`[UserService] << Usuario ${name} registrado satisfactoriamente.`);
+      Ok(newUser)
+    }
+  }
+}
+
+fn (s: UserService) GetUserProfile(id: String): Result<User, String> => {
+  s.repo.FindById(id)
+}
+
+// 8. Composition Root y Demostración Principal
+export fn main(): Unit => {
+  println("==================================================");
+  println("  PATRÓN DEPENDENCY INJECTION v3 (ESTILO GOLANG)");
+  println("==================================================");
+
+  // --- AMBIENTE 1: PRODUCCIÓN ---
+  println("--- 1. Composition Root de Producción (Servicios Reales) ---");
+  let prodRepo = NewInMemoryUserRepository();
+  let prodNotifier = NewEmailNotifier("mail.aura-cloud.internal");
+  let prodMetrics = NewPrometheusMetricsLogger("auth_subsystem");
+
+  // Inyección limpia por constructor (Pure DI)
+  let prodService = NewUserService(prodRepo, prodNotifier, prodMetrics);
+
+  let reg1 = prodService.RegisterUser("usr-1", "Ada Lovelace", "ada@aura-lang.org", "architect");
+  match reg1 {
+    Ok(u) => println(`✓ [Producción] Registrada: ${u.name} (Total en DB: ${prodRepo.Count()})`),
+    Err(e) => println(`✕ Error: ${e}`)
+  }
+
+  let reg2 = prodService.RegisterUser("usr-2", "Alan Turing", "alan@aura-lang.org", "engineer");
+  match reg2 {
+    Ok(u) => println(`✓ [Producción] Registrado: ${u.name} (Total en DB: ${prodRepo.Count()})`),
+    Err(e) => println(`✕ Error: ${e}`)
+  }
+
+  // Comprobación de consulta
+  let query1 = prodService.GetUserProfile("usr-1");
+  match query1 {
+    Ok(u) => println(`✓ [Producción] Perfil encontrado: ${u.name} | Rol: ${u.role}`),
+    Err(e) => println(`✕ ${e}`)
+  }
+
+  // --- AMBIENTE 2: TEST / CI-CD CON MOCKS ---
+  println("\n--- 2. Composition Root de Test (Pruebas Unitarias con Mocks) ---");
+  let testMockRepo = NewMockUserRepository();
+  let testNotifier = NewEmailNotifier("test-mock.local");
+  let testMetrics = NewPrometheusMetricsLogger("test_metrics");
+
+  // Inyectamos el mock sin tocar una sola línea de lógica de UserService
+  let testService = NewUserService(testMockRepo, testNotifier, testMetrics);
+
+  let testReg = testService.RegisterUser("test-99", "Grace Hopper", "grace@navy.mil", "compiler_lead");
+  match testReg {
+    Ok(u) => println(`✓ [Test Mock] Usuario verificado en suite de pruebas: ${u.name}`),
+    Err(e) => println(`✕ Error: ${e}`)
+  }
+
+  println("\n==================================================");
+  println("  ✓ Dependency Injection v3 completado.");
+  println("==================================================");
+};

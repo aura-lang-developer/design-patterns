@@ -1,0 +1,154 @@
+// =============================================================================
+// Patrón de Diseño: Strategy v3 (Estilo Idiomático Golang)
+// =============================================================================
+// Propósito:
+//   Define una familia de algoritmos intercambiables, encapsula cada uno de
+//   ellos y permite cambiarlos dinámicamente en tiempo de ejecución.
+//
+// Enfoque Golang en Aura Lang:
+//   - Dos vertientes idiomáticas de Go:
+//     1. Estrategia Polimórfica Basada en Interfaces (`TaxStrategy` duck-typed).
+//     2. Estrategia Funcional Basada en First-Class Functions (`type DiscountFn = fn(Float) -> Float`).
+//   - Estructura de Contexto `InvoiceCalculator` con métodos de receptor para
+//     intercambiar la estrategia en caliente (`SetStrategy`).
+// =============================================================================
+
+// --- PARTE 1: Estrategia Polimórfica Basada en Interfaces ---
+
+// 1. Interfaz Común de la Estrategia (Duck Typing)
+export interface TaxStrategy {
+  CalculateTax(amount: Float): Float;
+  Name(): String;
+}
+
+// 2. Estrategia Concreta A: IVA Chile (19%)
+export struct ChileVATTax {
+  __aura_type: String
+};
+
+export fn NewChileVATTax(): ChileVATTax => {
+  { __aura_type: "ChileVATTax" }
+};
+
+fn (t: ChileVATTax) Name(): String => "IVA Chile (19%)";
+
+fn (t: ChileVATTax) CalculateTax(amount: Float): Float => amount * 0.19;
+
+// 3. Estrategia Concreta B: Sales Tax de EE.UU. (Tasa por Estado)
+export struct USStateTax {
+  __aura_type: String,
+  state: String,
+  ratePercentage: Float
+};
+
+export fn NewUSStateTax(state: String, rate: Float): USStateTax => {
+  {
+    __aura_type: "USStateTax",
+    state: state,
+    ratePercentage: rate
+  }
+};
+
+fn (t: USStateTax) Name(): String => `US Sales Tax (${t.state} - ${t.ratePercentage}%)`;
+
+fn (t: USStateTax) CalculateTax(amount: Float): Float => amount * (t.ratePercentage / 100.0);
+
+// 4. Estrategia Concreta C: Zona Franca / Exento de Impuestos (0%)
+export struct TaxExemptZone {
+  __aura_type: String,
+  reason: String
+};
+
+export fn NewTaxExemptZone(reason: String): TaxExemptZone => {
+  {
+    __aura_type: "TaxExemptZone",
+    reason: reason
+  }
+};
+
+fn (t: TaxExemptZone) Name(): String => `Zona Franca Exenta (${t.reason})`;
+
+fn (t: TaxExemptZone) CalculateTax(amount: Float): Float => 0.0;
+
+// 5. Contexto: Factura / Carrito
+export struct InvoiceContext {
+  subtotal: Float,
+  strategy: TaxStrategy
+};
+
+export fn NewInvoiceContext(subtotal: Float, strat: TaxStrategy): InvoiceContext => {
+  {
+    subtotal: subtotal,
+    strategy: strat
+  }
+};
+
+// Métodos con Receptor para el Contexto
+fn (c: *InvoiceContext) SetTaxStrategy(strat: TaxStrategy): Unit => {
+  c.strategy = strat;
+}
+
+fn (c: InvoiceContext) CalculateTotal(): Float => {
+  let tax = c.strategy.CalculateTax(c.subtotal);
+  c.subtotal + tax
+}
+
+fn (c: InvoiceContext) Summary(): String => {
+  let tax = c.strategy.CalculateTax(c.subtotal);
+  let total = c.subtotal + tax;
+  `[Factura] Subtotal: $${c.subtotal} | Estrategia: '${c.strategy.Name()}' | Impuesto: $${tax} | Total: $${total}`
+}
+
+// --- PARTE 2: Estrategia Funcional (First-Class Functions) ---
+
+export type DiscountFn = fn(Float) -> Float;
+
+export fn ApplyDiscountStrategy(subtotal: Float, strategy: DiscountFn): Float => {
+  let discountAmount = strategy(subtotal);
+  subtotal - discountAmount
+};
+
+// 6. Punto de Entrada Principal
+export fn main(): Unit => {
+  println("==================================================");
+  println("  PATRÓN STRATEGY v3 (ESTILO GOLANG)");
+  println("==================================================");
+
+  println("--- 1. Estrategia Polimórfica Mediante Interfaces ---");
+
+  // Instanciamos el contexto con estrategia IVA Chile
+  let mut invoice = NewInvoiceContext(1000.0, NewChileVATTax());
+  let pInv = &invoice;
+
+  println("A. Facturación nacional en Chile:");
+  println(pInv.Summary());
+
+  // Intercambio dinámico de estrategia en tiempo de ejecución (Hot-Swap)
+  println("\nB. Cambio dinámico a estrategia EE.UU. (California 9.5%):");
+  pInv.SetTaxStrategy(NewUSStateTax("California", 9.5));
+  println(pInv.Summary());
+
+  println("\nC. Cambio dinámico a Zona Franca (Iquique ZOFRI 0%):");
+  pInv.SetTaxStrategy(NewTaxExemptZone("Región de Tarapacá"));
+  println(pInv.Summary());
+
+  println("\n--- 2. Estrategia Funcional con First-Class Functions ---");
+
+  let basePrice = 500.0;
+
+  // Estrategia Black Friday (30% off)
+  let blackFriday: DiscountFn = fn(amount: Float): Float => amount * 0.30;
+
+  // Estrategia Miembro Platino ($50 cupón fijo)
+  let memberCoupon: DiscountFn = fn(amount: Float): Float => 50.0;
+
+  let price1 = ApplyDiscountStrategy(basePrice, blackFriday);
+  println(`✓ Precio con Estrategia Black Friday: $${price1} (Ahorro: $${basePrice - price1})`);
+
+  let price2 = ApplyDiscountStrategy(basePrice, memberCoupon);
+  println(`✓ Precio con Estrategia Cupón Fijo: $${price2} (Ahorro: $${basePrice - price2})`);
+
+  println("\n==================================================");
+  println("  ✓ Strategy v3 completado exitosamente.");
+  println("==================================================");
+};

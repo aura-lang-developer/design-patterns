@@ -1,0 +1,142 @@
+// =============================================================================
+// Patrón de Diseño: Worker Pool v3 (Estilo Idiomático Golang)
+// =============================================================================
+// Propósito:
+//   Administra un número finito de workers concurrentes (Goroutines) para procesar
+//   una cola de tareas distribuidas a través de canales, previniendo sobrecarga de recursos.
+//
+// Enfoque Golang en Aura Lang:
+//   - Concurrencia CSP pura con canales de entrada con buffer (`jobsCh: Channel<Job>`)
+//     y canal de salida (`resultsCh: Channel<JobResult>`).
+//   - Estructura `WorkerPool` con métodos con receptor para inicializar, despachar y sincronizar.
+//   - Coordinación determinista de workers con `WaitGroup` (`Add`, `Done`, `Wait`).
+//   - Múltiples workers concurrentes consumiendo de un único canal compartido de tareas.
+// =============================================================================
+
+// 1. Tipos de Dominio de Tareas y Resultados
+export struct Job {
+  id: Int,
+  name: String,
+  value: Int
+};
+
+export struct JobResult {
+  jobId: Int,
+  workerId: Int,
+  computedOutput: Int,
+  success: Bool
+};
+
+// 2. Estructura del Pool de Trabajadores
+export struct WorkerPool {
+  numWorkers: Int,
+  jobsCh: Channel<Job>,
+  resultsCh: Channel<JobResult>,
+  wg: WaitGroup
+};
+
+export fn NewWorkerPool(workers: Int, jobQueueCapacity: Int): WorkerPool => {
+  return {
+    numWorkers: workers,
+    jobsCh: Channel.make<Job>(jobQueueCapacity),
+    resultsCh: Channel.make<JobResult>(jobQueueCapacity),
+    wg: WaitGroup.new()
+  };
+};
+
+// 3. Función del Ciclo de Vida del Worker
+fn launchWorker(workerId: Int, jobs: Channel<Job>, results: Channel<JobResult>, wg: WaitGroup): Unit => {
+  spawn {
+    println(`   ⚙️ [Worker #${workerId}] Iniciado y listo para recibir tareas...`);
+    let mut running = true;
+    while running {
+      let msg = <-jobs;
+      match msg {
+        Some(job) => {
+          let output = job.value * job.value + 10;
+          println(`   ⚙️ [Worker #${workerId}] Procesó Job #${job.id} ('${job.name}'): Salida = ${output}`);
+          let res: JobResult = {
+            jobId: job.id,
+            workerId: workerId,
+            computedOutput: output,
+            success: true
+          };
+          results <- res;
+          ()
+        },
+        None => {
+          println(`   ⏹️ [Worker #${workerId}] Canal cerrado. Finalizando worker.`);
+          running = false;
+          ()
+        }
+      }
+    };
+    wg.done();
+  };
+}
+
+// 4. Métodos con Receptor para el Pool
+fn (p: WorkerPool) Start(): Unit => {
+  p.wg.add(p.numWorkers);
+  for wId in [1, 2, 3] {
+    launchWorker(wId, p.jobsCh, p.resultsCh, p.wg);
+  }
+}
+
+fn (p: WorkerPool) Submit(job: Job): Unit => {
+  p.jobsCh <- job;
+  ()
+}
+
+fn (p: WorkerPool) CloseJobs(): Unit => {
+  Channel.close(p.jobsCh);
+}
+
+// 5. Punto de Entrada Principal Concurrente
+export async fn main(): Task<Unit, String> => {
+  println("==================================================");
+  println("  PATRÓN WORKER POOL CSP v3 (ESTILO GOLANG)");
+  println("==================================================");
+
+  let numWorkers = 3;
+  let pool = NewWorkerPool(numWorkers, 10);
+
+  println(`1. Iniciando WorkerPool con ${numWorkers} workers concurrentes...`);
+  pool.Start();
+
+  println("\n2. Encolando 6 tareas en el canal de jobs:");
+  let jobItems: []Job = [
+    { id: 1, name: "Calcular Hash SHA-256", value: 12 },
+    { id: 2, name: "Indexar Vector Embeddings", value: 25 },
+    { id: 3, name: "Compresión GZIP Archivo", value: 7 },
+    { id: 4, name: "Verificación de Firma RSA", value: 30 },
+    { id: 5, name: "Serialización Protobuf", value: 18 },
+    { id: 6, name: "Generar Reporte PDF", value: 4 }
+  ];
+
+  for item in jobItems {
+    pool.Submit(item);
+  }
+
+  // Cerrar el canal de jobs para notificar a los workers que no habrán más tareas
+  println("\n3. Cerrando canal de jobs y esperando finalización de workers con WaitGroup...");
+  pool.CloseJobs();
+
+  await pool.wg.wait();
+
+  // Recolectar resultados procesados
+  println("\n4. Recolectando resultados desde el canal de respuestas:");
+  for _ in [1, 2, 3, 4, 5, 6] {
+    let resMsg = <-pool.resultsCh;
+    match resMsg {
+      Some(r) => {
+        println(`   ✓ [Resultado] Job #${r.jobId} procesado por Worker #${r.workerId} -> Salida: ${r.computedOutput}`);
+      },
+      None => ()
+    }
+  }
+
+  println("\n==================================================");
+  println("  ✓ Worker Pool v3 completado exitosamente.");
+  println("==================================================");
+};

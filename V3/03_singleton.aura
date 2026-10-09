@@ -1,0 +1,153 @@
+// =============================================================================
+// Patrón de Diseño: Singleton Concurrente v3 (Estilo Idiomático Golang)
+// =============================================================================
+// Propósito:
+//   Garantiza que un recurso costoso del sistema (e.g., Connection Pool, Engine de Base de Datos)
+//   tenga exactamente una única instancia global, proveyendo un punto de acceso seguro.
+//
+// Enfoque Golang en Aura Lang:
+//   - Inicialización atómica única con la primitiva nativa `Once` (`sync.Once` de Go).
+//   - Estructura pura `DatabasePool` con `Mutex` interno para sincronización de conexiones activas.
+//   - Métodos con receptor (`fn (p: *DatabasePool) Query(...)`, `Stats()`).
+//   - Uso de `defer p.mu.unlock()` para desbloqueo garantizado de concurrencia.
+//   - Pruebas con múltiples goroutines concurrentes (`go`) y sincronización con `WaitGroup`.
+// =============================================================================
+
+// 1. Estructura del Pool de Base de Datos
+export struct DatabasePool {
+  dsn: String,
+  maxConnections: Int,
+  activeConnections: Int,
+  clusterNode: String,
+  mu: Mutex
+};
+
+// 2. Variables de Estado Global a Nivel de Paquete (Estilo `sync.Once` de Go)
+let poolOnce = Once.new();
+let mut instance: Option<DatabasePool> = None;
+let mut initCounter: Int = 0;
+
+// 3. Constructor Privado de la Instancia
+fn newDatabasePool(): DatabasePool => {
+  {
+    dsn: "postgresql://aura_admin:sec_token@db-cluster.internal:5432/core_db?sslmode=verify-full",
+    maxConnections: 100,
+    activeConnections: 0,
+    clusterNode: "sa-east-node-01",
+    mu: Mutex.new()
+  }
+};
+
+// 4. Punto de Acceso Global (Idiomático `Get...` o `GetInstance()`)
+export fn GetDatabasePool(): DatabasePool => {
+  poolOnce.do(() => {
+    initCounter = initCounter + 1;
+    println(">>> [SINGLETON: sync.Once] Inicializando DatabasePool por primera y única vez...");
+    instance = Some(newDatabasePool());
+  });
+
+  match instance {
+    Some(p) => p,
+    None => {
+      dsn: "",
+      maxConnections: 0,
+      activeConnections: 0,
+      clusterNode: "",
+      mu: Mutex.new()
+    }
+  }
+};
+
+// 5. Métodos con Receptor con Sincronización Mutex y Defer
+fn (p: *DatabasePool) AcquireConnection(): Result<Int, String> => {
+  p.mu.lock();
+  defer p.mu.unlock();
+
+  if (p.activeConnections >= p.maxConnections) {
+    return Err("Pool exhaustion: No connections available");
+  }
+
+  p.activeConnections = p.activeConnections + 1;
+  Ok(p.activeConnections)
+}
+
+fn (p: *DatabasePool) ReleaseConnection(): Unit => {
+  p.mu.lock();
+  defer p.mu.unlock();
+
+  if (p.activeConnections > 0) {
+    p.activeConnections = p.activeConnections - 1;
+  }
+}
+
+fn (p: *DatabasePool) Query(sql: String): Result<String, String> => {
+  p.mu.lock();
+  defer p.mu.unlock();
+
+  println(`  [DatabasePool @ ${p.clusterNode}] Ejecutando: "${sql}" (Conexiones activas: ${p.activeConnections})`);
+  Ok(`Query OK: 1 row affected`)
+}
+
+fn (p: DatabasePool) Stats(): String => {
+  `[DatabasePool Stats] Node: ${p.clusterNode} | DSN: ${p.dsn} | Max: ${p.maxConnections} | Activas: ${p.activeConnections}`
+}
+
+// 6. Demostración y Ejecución Concurrente
+export async fn main(): Task<Unit, String> => {
+  println("==================================================");
+  println("  PATRÓN SINGLETON CONCURRENTE v3 (ESTILO GOLANG)");
+  println("==================================================");
+
+  // A. Acceso secuencial desde diferentes componentes
+  println("1. Acceso secuencial inicial:");
+  let pool1 = GetDatabasePool();
+  let pRef1 = &pool1;
+  println(`   Cliente A obtuvo pool -> ${pRef1.Stats()}`);
+
+  let pool2 = GetDatabasePool();
+  let pRef2 = &pool2;
+  println(`   Cliente B obtuvo pool -> ${pRef2.Stats()}`);
+
+  let qRes = pRef1.Query("SELECT version();");
+  match qRes {
+    Ok(msg) => println(`   ✓ ${msg}`),
+    Err(e) => println(`   ✕ ${e}`)
+  }
+
+  // B. Prueba de Concurrencia Masiva con Goroutines y WaitGroup
+  println("\n2. Acceso altamente concurrente con 6 Goroutines simultáneas:");
+  let wg = WaitGroup.new();
+  let workerCount = 6;
+  wg.add(workerCount);
+
+  for workerId in [1, 2, 3, 4, 5, 6] {
+    go(fn(id: Int) => {
+      defer wg.done();
+      let localPool = GetDatabasePool();
+      let p = &localPool;
+      let connRes = p.AcquireConnection();
+      match connRes {
+        Ok(cId) => {
+          println(`   [Goroutine #${id}] Conexión asignada #${cId} sobre ${localPool.clusterNode}`);
+          p.ReleaseConnection();
+        },
+        Err(err) => println(`   [Goroutine #${id}] Error: ${err}`)
+      }
+    })(workerId);
+  }
+
+  await wg.wait();
+
+  // C. Verificación de la invariante sync.Once
+  println("\n3. Verificación de la Invariante Singleton:");
+  println(`   Total de inicializaciones ejecutadas: ${initCounter}`);
+  if (initCounter == 1) {
+    println("   ✓ ÉXITO: sync.Once garantizó exactamente 1 inicialización atómica.");
+  } else {
+    println("   ✕ FALLO: Múltiples inicializaciones detectadas.");
+  }
+
+  println("\n==================================================");
+  println("  ✓ Singleton Concurrente v3 completado.");
+  println("==================================================");
+};

@@ -1,0 +1,155 @@
+// =============================================================================
+// Patrón de Diseño: Adapter v3 (Estilo Idiomático Golang)
+// =============================================================================
+// Propósito:
+//   Permite que interfaces incompatibles colaboren entre sí, adaptando la interfaz
+//   de un subsistema legado o de terceros a la interfaz requerida por el dominio.
+//
+// Enfoque Golang en Aura Lang:
+//   - Duck Typing Estructural: La interfaz `PaymentProcessor` no se implementa
+//     con palabras clave, sino cumpliendo sus métodos en Go-style (`ProcessPayment`).
+//   - Estructuras puras: `LegacyXmlGateway`, `ModernStripeProcessor`, `LegacyPaymentAdapter`.
+//   - Composición de estructuras: El adaptador contiene la instancia del servicio legado.
+//   - Manejo idiomático de errores con `Result<T, String>` y guard clauses.
+// =============================================================================
+
+// 1. Tipo de Dominio para el Recibo de Pago
+export struct PaymentReceipt {
+  transactionId: String,
+  status: String,
+  amount: Float,
+  currency: String
+};
+
+// 2. Interfaz Objetivo Requerida por la Aplicación (Duck Typing)
+export interface PaymentProcessor {
+  ProcessPayment(amount: Float, currency: String, customerId: String): Result<PaymentReceipt, String>;
+  GetProviderName(): String;
+}
+
+// 3. Procesador Moderno Nativo (e.g., Stripe / Adyen)
+export struct ModernStripeProcessor {
+  __aura_type: String,
+  apiKey: String
+};
+
+export fn NewModernStripeProcessor(key: String): ModernStripeProcessor => {
+  {
+    __aura_type: "ModernStripeProcessor",
+    apiKey: key
+  }
+};
+
+fn (p: ModernStripeProcessor) GetProviderName(): String => "Stripe-Cloud-Gateway";
+
+fn (p: ModernStripeProcessor) ProcessPayment(amount: Float, currency: String, customerId: String): Result<PaymentReceipt, String> => {
+  if (amount <= 0.0) {
+    return Err("El monto de pago debe ser estrictamente positivo");
+  }
+  println(`  [Stripe] Cobro directo procesado por API REST JSON: $${amount} ${currency} para cliente ${customerId}`);
+  let receipt: PaymentReceipt = {
+    transactionId: "ch_stripe_99482710",
+    status: "APPROVED",
+    amount: amount,
+    currency: currency
+  };
+  Ok(receipt)
+}
+
+// 4. Servicio Legado Incompatible (Requiere payloads XML en crudo)
+export struct LegacyXmlGateway {
+  endpoint: String,
+  terminalId: String
+};
+
+export fn NewLegacyXmlGateway(endpoint: String, terminal: String): LegacyXmlGateway => {
+  {
+    endpoint: endpoint,
+    terminalId: terminal
+  }
+};
+
+fn (g: LegacyXmlGateway) TransmitXmlPayload(xml: String): String => {
+  println(`  [Legacy-Gateway @ ${g.endpoint}] Transmitiendo payload XML al mainframe bancario:`);
+  println(`    ${xml}`);
+  // Simulación de respuesta XML
+  "<response><status>OK</status><auth>AUTH-MAINFRAME-7721</auth><txId>TX-LEGACY-00912</txId></response>"
+}
+
+// 5. El Adaptador (Adapter): Envuelve el servicio legado para satisfacer PaymentProcessor
+export struct LegacyPaymentAdapter {
+  __aura_type: String,
+  gateway: LegacyXmlGateway
+};
+
+export fn NewLegacyPaymentAdapter(legacy: LegacyXmlGateway): LegacyPaymentAdapter => {
+  {
+    __aura_type: "LegacyPaymentAdapter",
+    gateway: legacy
+  }
+};
+
+fn (a: LegacyPaymentAdapter) GetProviderName(): String => {
+  `Legacy-Adapter (Terminal: ${a.gateway.terminalId})`
+}
+
+fn (a: LegacyPaymentAdapter) ProcessPayment(amount: Float, currency: String, customerId: String): Result<PaymentReceipt, String> => {
+  if (amount <= 0.0) {
+    return Err("Monto inválido para pasarela legada");
+  }
+
+  // Traducción de datos de dominio modernos al formato XML esperado por el mainframe
+  println(`  [Adapter] Traduciendo llamada tipada a XML para el mainframe legado...`);
+  let xmlRequest = `<trans><term>${a.gateway.terminalId}</term><cust>${customerId}</cust><val>${amount}</val><curr>${currency}</curr></trans>`;
+
+  let xmlResponse = a.gateway.TransmitXmlPayload(xmlRequest);
+
+  if (!xmlResponse.includes("<status>OK</status>")) {
+    return Err("La pasarela bancaria legada rechazó la transacción");
+  }
+
+  let receipt: PaymentReceipt = {
+    transactionId: "TX-LEGACY-00912",
+    status: "APPROVED_BY_MAINFRAME",
+    amount: amount,
+    currency: currency
+  };
+  Ok(receipt)
+}
+
+// 6. Función Cliente (Polimorfismo puro con Duck Typing)
+export fn ExecuteCheckout(processor: PaymentProcessor, amount: Float, currency: String, customer: String): Unit => {
+  println(`\nIniciando checkout con pasarela: [${processor.GetProviderName()}]`);
+  let res = processor.ProcessPayment(amount, currency, customer);
+  match res {
+    Ok(receipt) => {
+      println(`✓ Pago exitoso! ID: ${receipt.transactionId} | Estado: ${receipt.status} | Monto: $${receipt.amount} ${receipt.currency}`);
+    },
+    Err(err) => {
+      println(`✕ Fallo en el checkout: ${err}`);
+    }
+  }
+};
+
+// 7. Punto de Entrada Principal
+export fn main(): Unit => {
+  println("==================================================");
+  println("  PATRÓN ADAPTER v3 (ESTILO GOLANG)");
+  println("==================================================");
+
+  // A. Uso directo de un procesador moderno
+  let stripe = NewModernStripeProcessor("sk_live_prod_849201");
+  ExecuteCheckout(stripe, 150.0, "USD", "cust_modern_01");
+
+  // B. Uso del gateway legado a través del Adaptador
+  let legacyBank = NewLegacyXmlGateway("https://mainframe.swift-net.internal/xml", "TERM-CORP-99");
+  let adaptedLegacy = NewLegacyPaymentAdapter(legacyBank);
+  ExecuteCheckout(adaptedLegacy, 499.99, "EUR", "cust_enterprise_02");
+
+  // C. Caso de error controlado en el adaptador
+  ExecuteCheckout(adaptedLegacy, -10.0, "USD", "cust_bad_03");
+
+  println("\n==================================================");
+  println("  ✓ Adapter v3 completado exitosamente.");
+  println("==================================================");
+};

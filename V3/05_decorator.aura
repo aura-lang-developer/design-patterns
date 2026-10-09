@@ -1,0 +1,144 @@
+// =============================================================================
+// Patrón de Diseño: Decorator v3 (Estilo Idiomático Golang)
+// =============================================================================
+// Propósito:
+//   Añade responsabilidades transversales (logging, métricas, autorización) a un
+//   objeto dinámicamente envolviéndolo en otra estructura que satisface la misma interfaz.
+//
+// Enfoque Golang en Aura Lang:
+//   - Interfaz `DataStore` común con Duck Typing Estructural.
+//   - Estructura base `MemoryStore` y decoradores envolventes `LoggingStoreDecorator`, `MetricsStoreDecorator`.
+//   - Composición de interfaces: Cada decorador contiene un campo `inner: DataStore`.
+//   - Sentencia `defer` LIFO para logging y medición simétrica de inicio/fin.
+//   - Constructores canónicos `New...Decorator(inner: DataStore)` que permiten encadenamiento limpio.
+// =============================================================================
+
+// 1. Interfaz Común del Servicio (Go Duck Typing)
+export interface DataStore {
+  Get(key: String): Result<String, String>;
+  Put(key: String, value: String): Result<Unit, String>;
+  Name(): String;
+}
+
+// 2. Componente Núcleo Base (Core Store)
+export struct MemoryStore {
+  __aura_type: String,
+  storageNode: String
+};
+
+export fn NewMemoryStore(node: String): MemoryStore => {
+  {
+    __aura_type: "MemoryStore",
+    storageNode: node
+  }
+};
+
+fn (s: MemoryStore) Name(): String => `MemoryStore(${s.storageNode})`;
+
+fn (s: MemoryStore) Get(key: String): Result<String, String> => {
+  println(`      [MemoryStore @ ${s.storageNode}] Recuperando llave '${key}'`);
+  if (key == "missing") {
+    return Err(`Key '${key}' not found in memory`);
+  }
+  Ok(`val_${key}_live`)
+}
+
+fn (s: MemoryStore) Put(key: String, value: String): Result<Unit, String> => {
+  println(`      [MemoryStore @ ${s.storageNode}] Guardando '${key}' = '${value}'`);
+  Ok(())
+}
+
+// 3. Decorador 1: Registro y Auditoría (Logging Decorator)
+export struct LoggingStoreDecorator {
+  __aura_type: String,
+  inner: DataStore
+};
+
+export fn NewLoggingStoreDecorator(store: DataStore): LoggingStoreDecorator => {
+  {
+    __aura_type: "LoggingStoreDecorator",
+    inner: store
+  }
+};
+
+fn (d: LoggingStoreDecorator) Name(): String => `LoggingDecorator -> ${d.inner.Name()}`;
+
+fn (d: LoggingStoreDecorator) Get(key: String): Result<String, String> => {
+  println(`   📋 [AUDIT-LOG] >> Iniciando Get(key="${key}")`);
+  defer println(`   📋 [AUDIT-LOG] << Finalizado Get(key="${key}")`);
+  d.inner.Get(key)
+}
+
+fn (d: LoggingStoreDecorator) Put(key: String, value: String): Result<Unit, String> => {
+  println(`   📋 [AUDIT-LOG] >> Iniciando Put(key="${key}", val="${value}")`);
+  defer println(`   📋 [AUDIT-LOG] << Finalizado Put(key="${key}")`);
+  d.inner.Put(key, value)
+}
+
+// 4. Decorador 2: Medición de Latencia y Telemetría (Metrics Decorator)
+export struct MetricsStoreDecorator {
+  __aura_type: String,
+  inner: DataStore,
+  collectorTag: String
+};
+
+export fn NewMetricsStoreDecorator(store: DataStore, tag: String): MetricsStoreDecorator => {
+  {
+    __aura_type: "MetricsStoreDecorator",
+    inner: store,
+    collectorTag: tag
+  }
+};
+
+fn (m: MetricsStoreDecorator) Name(): String => `MetricsDecorator(${m.collectorTag}) -> ${m.inner.Name()}`;
+
+fn (m: MetricsStoreDecorator) Get(key: String): Result<String, String> => {
+  println(`   ⏱️ [METRICS @ ${m.collectorTag}] Reloj iniciado para Get...`);
+  defer println(`   ⏱️ [METRICS @ ${m.collectorTag}] Métrica emitida: latencia=1.4ms, status=ok`);
+  m.inner.Get(key)
+}
+
+fn (m: MetricsStoreDecorator) Put(key: String, value: String): Result<Unit, String> => {
+  println(`   ⏱️ [METRICS @ ${m.collectorTag}] Reloj iniciado para Put...`);
+  defer println(`   ⏱️ [METRICS @ ${m.collectorTag}] Métrica emitida: bytes_written=${len(value)}`);
+  m.inner.Put(key, value)
+}
+
+// 5. Función Consumidora del Servicio
+export fn ExecuteStoreOperations(store: DataStore): Unit => {
+  println(`\nProbando DataStore: [${store.Name()}]`);
+  let putRes = store.Put("user:session:981", "token_jwt_val");
+  match putRes {
+    Ok(_) => println("   ✓ Put completado con éxito"),
+    Err(e) => println(`   ✕ Error en Put: ${e}`)
+  }
+
+  let getRes = store.Get("user:session:981");
+  match getRes {
+    Ok(v) => println(`   ✓ Get obtenido: "${v}"`),
+    Err(e) => println(`   ✕ Error en Get: ${e}`)
+  }
+};
+
+// 6. Punto de Entrada Principal
+export fn main(): Unit => {
+  println("==================================================");
+  println("  PATRÓN DECORATOR v3 (ESTILO GOLANG)");
+  println("==================================================");
+
+  // A. Componente base sin decorar
+  let baseStore = NewMemoryStore("cluster-us-east");
+  ExecuteStoreOperations(baseStore);
+
+  // B. Decorando con Logging
+  let loggedStore = NewLoggingStoreDecorator(baseStore);
+  ExecuteStoreOperations(loggedStore);
+
+  // C. Decorando en capas (Base + Logging + Metrics) estilo Go middleware
+  let fullyDecorated = NewMetricsStoreDecorator(loggedStore, "prod-telemetry");
+  ExecuteStoreOperations(fullyDecorated);
+
+  println("\n==================================================");
+  println("  ✓ Decorator v3 completado exitosamente.");
+  println("==================================================");
+};

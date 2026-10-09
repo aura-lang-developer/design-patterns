@@ -1,0 +1,232 @@
+// =============================================================================
+// Patrón de Diseño: State v3 (Estilo Idiomático Golang)
+// =============================================================================
+// Propósito:
+//   Permite que un objeto altere su comportamiento cuando su estado interno cambia,
+//   modelando una máquina de estados finita (FSM) orientada a interfaces y desacoplada.
+//
+// Enfoque Golang en Aura Lang:
+//   - Interfaz `OrderState` (Duck Typing): define métodos de transición `Next()`, `Cancel()`, `Name()`.
+//   - Estructura de Contexto `OrderContext`: almacena el estado actual y un slice de historial (`[]String`).
+//   - Estructuras Concretas de Estado: `CreatedState`, `PaidState`, `ShippedState`, `DeliveredState`, `CancelledState`.
+//   - Cada estado valida y ejecuta las transiciones legales e invalida las ilegales con `Result.Err`,
+//     siguiendo la estructura clásica de Go para máquinas de estado basadas en objetos.
+// =============================================================================
+
+// 1. Declaración de Tipos Adelantada y Contexto de la Máquina de Estados
+export struct OrderContext {
+  id: String,
+  state: OrderState,
+  history: []String
+};
+
+fn (c: OrderContext) SetState(newState: OrderState): Unit => {
+  c.state = newState;
+  c.history = append(c.history, newState.Name());
+}
+
+fn (c: OrderContext) Status(): String => {
+  `[Order #${c.id}] Estado Actual: ${c.state.Name()} (Historial: ${len(c.history)} transiciones)`
+}
+
+// 2. Interfaz Estructural del Estado (Duck Typing)
+export interface OrderState {
+  Name(): String;
+  Next(ctx: OrderContext): Result<String, String>;
+  Cancel(ctx: OrderContext, reason: String): Result<String, String>;
+}
+
+// 3. Estado 1: Creado (CreatedState)
+export struct CreatedState {
+  __aura_type: String
+};
+
+export fn NewCreatedState(): CreatedState => {
+  return { __aura_type: "CreatedState" };
+};
+
+fn (s: CreatedState) Name(): String => "CREATED";
+
+fn (s: CreatedState) Next(ctx: OrderContext): Result<String, String> => {
+  println(`   🔄 [Transición FSM] CREATED -> PAID`);
+  ctx.SetState(NewPaidState());
+  Ok("Orden pagada exitosamente")
+}
+
+fn (s: CreatedState) Cancel(ctx: OrderContext, reason: String): Result<String, String> => {
+  println(`   🔄 [Transición FSM] CREATED -> CANCELLED (${reason})`);
+  ctx.SetState(NewCancelledState(reason));
+  Ok(`Orden cancelada: ${reason}`)
+}
+
+// 4. Estado 2: Pagado (PaidState)
+export struct PaidState {
+  __aura_type: String
+};
+
+export fn NewPaidState(): PaidState => {
+  return { __aura_type: "PaidState" };
+};
+
+fn (s: PaidState) Name(): String => "PAID";
+
+fn (s: PaidState) Next(ctx: OrderContext): Result<String, String> => {
+  println(`   🔄 [Transición FSM] PAID -> SHIPPED`);
+  ctx.SetState(NewShippedState());
+  Ok("Orden empaquetada y entregada al courier")
+}
+
+fn (s: PaidState) Cancel(ctx: OrderContext, reason: String): Result<String, String> => {
+  println(`   🔄 [Transición FSM] PAID -> CANCELLED (Reembolso iniciado: ${reason})`);
+  ctx.SetState(NewCancelledState(reason));
+  Ok(`Orden pagada revertida con reembolso: ${reason}`)
+}
+
+// 5. Estado 3: Enviado (ShippedState)
+export struct ShippedState {
+  __aura_type: String
+};
+
+export fn NewShippedState(): ShippedState => {
+  return { __aura_type: "ShippedState" };
+};
+
+fn (s: ShippedState) Name(): String => "SHIPPED";
+
+fn (s: ShippedState) Next(ctx: OrderContext): Result<String, String> => {
+  println(`   🔄 [Transición FSM] SHIPPED -> DELIVERED`);
+  ctx.SetState(NewDeliveredState());
+  Ok("Orden recibida por el cliente en destino")
+}
+
+fn (s: ShippedState) Cancel(ctx: OrderContext, reason: String): Result<String, String> => {
+  // Transición Ilegal: No se puede cancelar un paquete ya en tránsito
+  Err("Transición inválida: No es posible cancelar un pedido que ya fue despachado")
+}
+
+// 6. Estado 4: Entregado (DeliveredState - Estado Terminal Positivo)
+export struct DeliveredState {
+  __aura_type: String
+};
+
+export fn NewDeliveredState(): DeliveredState => {
+  return { __aura_type: "DeliveredState" };
+};
+
+fn (s: DeliveredState) Name(): String => "DELIVERED";
+
+fn (s: DeliveredState) Next(ctx: OrderContext): Result<String, String> => {
+  Err("Transición inválida: La orden ya se encuentra en su estado final de entrega")
+}
+
+fn (s: DeliveredState) Cancel(ctx: OrderContext, reason: String): Result<String, String> => {
+  Err("Transición inválida: No se puede cancelar una orden que ya fue entregada")
+}
+
+// 7. Estado 5: Cancelado (CancelledState - Estado Terminal Negativo)
+export struct CancelledState {
+  __aura_type: String,
+  cancelReason: String
+};
+
+export fn NewCancelledState(reason: String): CancelledState => {
+  return {
+    __aura_type: "CancelledState",
+    cancelReason: reason
+  };
+};
+
+fn (s: CancelledState) Name(): String => `CANCELLED("${s.cancelReason}")`;
+
+fn (s: CancelledState) Next(ctx: OrderContext): Result<String, String> => {
+  Err("Transición inválida: No se puede avanzar una orden que fue cancelada")
+}
+
+fn (s: CancelledState) Cancel(ctx: OrderContext, reason: String): Result<String, String> => {
+  Err("Transición inválida: La orden ya está cancelada")
+}
+
+// 8. Constructor del Contexto de Orden
+export fn NewOrderContext(id: String): OrderContext => {
+  let initialState: OrderState = NewCreatedState();
+  let emptyHistory: []String = ["CREATED"];
+  return {
+    id: id,
+    state: initialState,
+    history: emptyHistory
+  };
+};
+
+// 9. Métodos de Fachada en Contexto
+fn (c: OrderContext) Advance(): Result<String, String> => c.state.Next(c);
+
+fn (c: OrderContext) CancelOrder(reason: String): Result<String, String> => c.state.Cancel(c, reason);
+
+// 10. Punto de Entrada Principal
+export fn main(): Unit => {
+  println("==================================================");
+  println("  PATRÓN STATE v3 (ESTILO GOLANG)");
+  println("==================================================");
+
+  // A. Ciclo de Vida Exitoso Completo (Happy Path)
+  println("1. Ciclo de vida completo exitoso de una Orden:");
+  let order1 = NewOrderContext("ORD-7701");
+  println(`   Estado inicial: ${order1.Status()}`);
+
+  // Transición 1: CREATED -> PAID
+  let t1 = order1.Advance();
+  match t1 {
+    Ok(m) => println(`   ✓ ${m}`),
+    Err(e) => println(`   ✕ ${e}`)
+  }
+
+  // Transición 2: PAID -> SHIPPED
+  let t2 = order1.Advance();
+  match t2 {
+    Ok(m) => println(`   ✓ ${m}`),
+    Err(e) => println(`   ✕ ${e}`)
+  }
+
+  // Intento de cancelación ilegal sobre orden enviada
+  println("\n2. Probando transición ilegal: Cancelar pedido despachado:");
+  let illegalCancel = order1.CancelOrder("Cliente cambió de opinión");
+  match illegalCancel {
+    Ok(_) => println("   ✕ Error: Debería haber fallado"),
+    Err(err) => println(`   ✓ Validación FSM esperada: "${err}"`)
+  }
+
+  // Transición 3: SHIPPED -> DELIVERED
+  println("\n3. Completando la entrega:");
+  let t3 = order1.Advance();
+  match t3 {
+    Ok(m) => println(`   ✓ ${m}`),
+    Err(e) => println(`   ✕ ${e}`)
+  }
+
+  // Intento de avanzar tras llegar a estado terminal
+  let terminalAttempt = order1.Advance();
+  match terminalAttempt {
+    Ok(_) => (),
+    Err(err) => println(`   ✓ Comprobación estado terminal: "${err}"`)
+  }
+
+  println(`\nHistorial completo de la Orden 1:`);
+  for h in order1.history {
+    println(`   -> ${h}`);
+  }
+
+  // B. Ciclo con Cancelación Temprana
+  println("\n4. Ciclo de Orden con cancelación temprana (PAID -> CANCELLED):");
+  let order2 = NewOrderContext("ORD-7702");
+  order2.Advance(); // A PAID
+  let cancelRes = order2.CancelOrder("Falta de stock en bodega central");
+  match cancelRes {
+    Ok(m) => println(`   ✓ ${m}`),
+    Err(e) => println(`   ✕ ${e}`)
+  }
+  println(`   Estado final Orden 2: ${order2.Status()}`);
+
+  println("\n==================================================");
+  println("  ✓ State v3 completado exitosamente.");
+  println("==================================================");
+};

@@ -1,0 +1,204 @@
+// =============================================================================
+// Patrón de Diseño: Facade v3 (Estilo Idiomático Golang)
+// =============================================================================
+// Propósito:
+//   Proporciona una interfaz unificada y de alto nivel sobre un conjunto complejo
+//   de subsistemas heterogéneos, reduciendo el acoplamiento y la complejidad operativa.
+//
+// Enfoque Golang en Aura Lang:
+//   - Subsistemas independientes modelados como structs puros con métodos propios.
+//   - Composición de estructuras: La fachada `OrderProcessingFacade` contiene referencias
+//     a todos los subsistemas requeridos.
+//   - Manejo de flujo con Guard Clauses y retornos tempranos (`return Err(...)`),
+//     el patrón por excelencia de Go ante errores.
+//   - Sentencia `defer` para auditoría y registro de ciclo de vida de la transacción.
+// =============================================================================
+
+// 1. Tipos de Dominio para Petición y Respuesta
+export struct OrderRequest {
+  orderId: String,
+  productSku: String,
+  quantity: Int,
+  amount: Float,
+  customerEmail: String,
+  shippingAddress: String
+};
+
+export struct OrderSummary {
+  orderId: String,
+  reservationCode: String,
+  paymentReceipt: String,
+  trackingCode: String,
+  status: String
+};
+
+// 2. Subsistema 1: Inventario de Almacén
+export struct InventorySubsystem {
+  warehouseCode: String
+};
+
+export fn NewInventorySubsystem(code: String): InventorySubsystem => {
+  { warehouseCode: code }
+};
+
+fn (sub: InventorySubsystem) ReserveStock(sku: String, qty: Int): Result<String, String> => {
+  println(`   [1. Inventario @ ${sub.warehouseCode}] Reservando ${qty}x '${sku}'...`);
+  if (qty > 10) {
+    return Err(`Stock insuficiente para '${sku}' (máximo permitido por pedido: 10)`);
+  }
+  Ok("RES-WH-88492")
+}
+
+// 3. Subsistema 2: Pasarela Financiera
+export struct PaymentSubsystem {
+  merchantId: String
+};
+
+export fn NewPaymentSubsystem(merchant: String): PaymentSubsystem => {
+  { merchantId: merchant }
+};
+
+fn (sub: PaymentSubsystem) ProcessCharge(customer: String, amount: Float): Result<String, String> => {
+  println(`   [2. Finanzas @ ${sub.merchantId}] Cobrando $${amount} a cuenta '${customer}'...`);
+  if (amount <= 0.0) {
+    return Err("Monto de transacción inválido");
+  }
+  Ok("TX-PAY-55019A")
+}
+
+// 4. Subsistema 3: Logística y Transporte
+export struct LogisticsSubsystem {
+  carrierPartner: String
+};
+
+export fn NewLogisticsSubsystem(carrier: String): LogisticsSubsystem => {
+  { carrierPartner: carrier }
+};
+
+fn (sub: LogisticsSubsystem) DispatchShipment(orderId: String, destination: String): Result<String, String> => {
+  println(`   [3. Logística @ ${sub.carrierPartner}] Generando guía de despacho hacia '${destination}'...`);
+  Ok("TRACK-DHL-CL-19482")
+}
+
+// 5. Subsistema 4: Mensajería al Cliente
+export struct NotificationSubsystem {
+  senderEmail: String
+};
+
+export fn NewNotificationSubsystem(sender: String): NotificationSubsystem => {
+  { senderEmail: sender }
+};
+
+fn (sub: NotificationSubsystem) SendConfirmation(recipient: String, orderId: String): Result<Unit, String> => {
+  println(`   [4. Notificaciones @ ${sub.senderEmail}] Correo de confirmación enviado a '${recipient}'`);
+  Ok(())
+}
+
+// 6. La Fachada (Facade): Orquestador de Alto Nivel
+export struct OrderProcessingFacade {
+  inventory: InventorySubsystem,
+  payment: PaymentSubsystem,
+  logistics: LogisticsSubsystem,
+  notifications: NotificationSubsystem
+};
+
+export fn NewOrderProcessingFacade(): OrderProcessingFacade => {
+  {
+    inventory: NewInventorySubsystem("WH-SANTIAGO-01"),
+    payment: NewPaymentSubsystem("MERCHANT-AURA-GLOBAL"),
+    logistics: NewLogisticsSubsystem("DHL-EXPRESS"),
+    notifications: NewNotificationSubsystem("orders@auracloud.io")
+  }
+};
+
+// Orquestación con manejo de errores idiomático de Go
+fn (f: OrderProcessingFacade) PlaceOrder(req: OrderRequest): Result<OrderSummary, String> => {
+  println(`\n[Facade] >> Iniciando flujo orquestado para Orden #${req.orderId}...`);
+  defer println(`[Facade] << Ciclo de orquestación finalizado para Orden #${req.orderId}.`);
+
+  // Paso 1: Reserva de Inventario
+  let reserveRes = f.inventory.ReserveStock(req.productSku, req.quantity);
+  match reserveRes {
+    Err(e) => Err(`Fallo de inventario: ${e}`),
+    Ok(resCode) => {
+      // Paso 2: Cobro al Cliente
+      let paymentRes = f.payment.ProcessCharge(req.customerEmail, req.amount);
+      match paymentRes {
+        Err(e) => Err(`Fallo en cobro financiero: ${e}`),
+        Ok(payCode) => {
+          // Paso 3: Logística y Transporte
+          let shipRes = f.logistics.DispatchShipment(req.orderId, req.shippingAddress);
+          match shipRes {
+            Err(e) => Err(`Fallo en logística: ${e}`),
+            Ok(trackCode) => {
+              // Paso 4: Notificación al Comprador
+              let notifyRes = f.notifications.SendConfirmation(req.customerEmail, req.orderId);
+              match notifyRes {
+                Ok(_) => (),
+                Err(e) => println(`⚠️ Advertencia: No se pudo enviar notificación: ${e}`)
+              }
+
+              let summary: OrderSummary = {
+                orderId: req.orderId,
+                reservationCode: resCode,
+                paymentReceipt: payCode,
+                trackingCode: trackCode,
+                status: "CONFIRMED_AND_SHIPPED"
+              };
+
+              Ok(summary)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// 7. Punto de Entrada Principal
+export fn main(): Unit => {
+  println("==================================================");
+  println("  PATRÓN FACADE v3 (ESTILO GOLANG)");
+  println("==================================================");
+
+  let facade = NewOrderProcessingFacade();
+
+  // A. Pedido Exitoso
+  let req1: OrderRequest = {
+    orderId: "ORD-2026-8801",
+    productSku: "LAPTOP-M3-MAX",
+    quantity: 2,
+    amount: 3499.00,
+    customerEmail: "ada.lovelace@aura-lang.org",
+    shippingAddress: "Av. Las Condes 12345, Santiago"
+  };
+
+  let res1 = facade.PlaceOrder(req1);
+  match res1 {
+    Ok(summary) => {
+      println(`✓ ÉXITO: Orden confirmada!`);
+      println(`  Reserva: ${summary.reservationCode} | Pago: ${summary.paymentReceipt} | Guía: ${summary.trackingCode} | Estado: ${summary.status}`);
+    },
+    Err(err) => println(`✕ Error: ${err}`)
+  }
+
+  // B. Pedido con Fallo Temprano (Exceso de inventario)
+  let req2: OrderRequest = {
+    orderId: "ORD-2026-8802",
+    productSku: "LAPTOP-M3-MAX",
+    quantity: 99, // Supera el límite de 10
+    amount: 99999.00,
+    customerEmail: "bulk.buyer@corp.com",
+    shippingAddress: "Zona Franca, Valparaíso"
+  };
+
+  let res2 = facade.PlaceOrder(req2);
+  match res2 {
+    Ok(_) => println("✕ Error: El pedido debió haber fallado"),
+    Err(err) => println(`✓ Control de fallo temprano verificado: "${err}"`)
+  }
+
+  println("\n==================================================");
+  println("  ✓ Facade v3 completado exitosamente.");
+  println("==================================================");
+};

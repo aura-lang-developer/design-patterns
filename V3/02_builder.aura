@@ -1,0 +1,187 @@
+// =============================================================================
+// Patrón de Diseño: Builder v3 (Estilo Idiomático Golang)
+// =============================================================================
+// Propósito:
+//   Separa la construcción de un objeto complejo de su representación, permitiendo
+//   la configuración paso a paso con encadenamiento fluído y validación rigurosa.
+//
+// Enfoque Golang en Aura Lang:
+//   - Estructura final pura (`ServerConfig`) y estructura constructora (`ServerConfigBuilder`).
+//   - Métodos con receptor de puntero (`fn (b: *ServerConfigBuilder) ...`) para
+//     mutación en memoria sin clonaciones innecesarias, retornando `*ServerConfigBuilder`
+//     para permitir una Fluent API idiomática (`b.SetPort(...).AddRoute(...)`).
+//   - Slices nativos (`[]String`, `append`) para listas dinámicas de rutas.
+//   - Verificación estricta de invariantes en `Build()`, retornando `Result<ServerConfig, String>`.
+//   - Constructor `NewServerConfigBuilder()` inicializado con valores por defecto seguros.
+// =============================================================================
+
+// 1. Estructura del Producto Final
+export struct ServerConfig {
+  host: String,
+  port: Int,
+  tlsEnabled: Bool,
+  timeoutMs: Int,
+  maxConnections: Int,
+  routes: []String
+};
+
+// 2. Método de visualización para ServerConfig
+fn (cfg: ServerConfig) Summary(): String => {
+  let tlsStr = if (cfg.tlsEnabled) { "Habilitado (HTTPS)" } else { "Deshabilitado (HTTP)" };
+  let routeCount = len(cfg.routes);
+  `[ServerConfig] Dirección: ${cfg.host}:${cfg.port} | TLS: ${tlsStr} | Timeout: ${cfg.timeoutMs}ms | Conexiones: ${cfg.maxConnections} | Rutas: ${routeCount}`
+}
+
+// 3. Estructura del Builder
+export struct ServerConfigBuilder {
+  host: String,
+  port: Int,
+  tlsEnabled: Bool,
+  timeoutMs: Int,
+  maxConnections: Int,
+  routes: []String
+};
+
+// 4. Constructor Inicializador con Defaults de Red
+export fn NewServerConfigBuilder(): ServerConfigBuilder => {
+  let emptyRoutes: []String = [];
+  {
+    host: "127.0.0.1",
+    port: 8080,
+    tlsEnabled: false,
+    timeoutMs: 5000,
+    maxConnections: 1000,
+    routes: emptyRoutes
+  }
+};
+
+// 5. Métodos Fluídos con Receptor de Puntero
+fn (b: *ServerConfigBuilder) SetHost(host: String): *ServerConfigBuilder => {
+  b.host = host;
+  b
+}
+
+fn (b: *ServerConfigBuilder) SetPort(port: Int): *ServerConfigBuilder => {
+  b.port = port;
+  b
+}
+
+fn (b: *ServerConfigBuilder) EnableTLS(enabled: Bool): *ServerConfigBuilder => {
+  b.tlsEnabled = enabled;
+  b
+}
+
+fn (b: *ServerConfigBuilder) SetTimeout(timeoutMs: Int): *ServerConfigBuilder => {
+  b.timeoutMs = timeoutMs;
+  b
+}
+
+fn (b: *ServerConfigBuilder) SetMaxConnections(max: Int): *ServerConfigBuilder => {
+  b.maxConnections = max;
+  b
+}
+
+fn (b: *ServerConfigBuilder) AddRoute(route: String): *ServerConfigBuilder => {
+  b.routes = append(b.routes, route);
+  b
+}
+
+// 6. Método Build con Validación de Errores al Estilo Go
+fn (b: *ServerConfigBuilder) Build(): Result<ServerConfig, String> => {
+  // Guard clauses con validación temprana
+  if (b.host == "") {
+    return Err("El host del servidor no puede estar vacío");
+  }
+  if (b.port <= 0 || b.port > 65535) {
+    return Err(`Puerto TCP fuera de rango válido: ${b.port} (esperado entre 1 y 65535)`);
+  }
+  if (b.timeoutMs <= 0) {
+    return Err(`Timeout inválido: ${b.timeoutMs}ms. Debe ser mayor a 0`);
+  }
+  if (b.maxConnections <= 0) {
+    return Err(`maxConnections debe ser un entero positivo, recibido: ${b.maxConnections}`);
+  }
+
+  let finalConfig: ServerConfig = {
+    host: b.host,
+    port: b.port,
+    tlsEnabled: b.tlsEnabled,
+    timeoutMs: b.timeoutMs,
+    maxConnections: b.maxConnections,
+    routes: b.routes
+  };
+
+  Ok(finalConfig)
+}
+
+// 7. Punto de Entrada Principal
+export fn main(): Unit => {
+  println("==================================================");
+  println("  PATRÓN BUILDER v3 (ESTILO GOLANG)");
+  println("==================================================");
+
+  // A. Construcción exitosa de Servidor de Producción (HTTPS)
+  println("1. Configurando Servidor de Producción con API fluida...");
+  let mut prodBuilder = NewServerConfigBuilder();
+  let bProd = &prodBuilder;
+
+  bProd
+    .SetHost("api.aura-lang.org")
+    .SetPort(443)
+    .EnableTLS(true)
+    .SetTimeout(15000)
+    .SetMaxConnections(50000)
+    .AddRoute("/healthz")
+    .AddRoute("/api/v1/auth")
+    .AddRoute("/api/v1/workspaces")
+    .AddRoute("/metrics");
+
+  let prodResult = bProd.Build();
+  match prodResult {
+    Ok(cfg) => {
+      println("✓ Servidor de producción construido con éxito:");
+      println(`  ${cfg.Summary()}`);
+      println(`  Detalle de rutas configuradas (${len(cfg.routes)}):`);
+      for r in cfg.routes {
+        println(`    -> ${r}`);
+      }
+    },
+    Err(e) => println(`✕ Error de construcción: ${e}`)
+  }
+
+  // B. Construcción de Servidor de Microservicio Ligero
+  println("\n2. Configurando Microservicio Interno...");
+  let mut devBuilder = NewServerConfigBuilder();
+  let bDev = &devBuilder;
+
+  bDev
+    .SetHost("0.0.0.0")
+    .SetPort(3000)
+    .AddRoute("/ping");
+
+  let devResult = bDev.Build();
+  match devResult {
+    Ok(cfg) => {
+      println("✓ Microservicio dev construido con éxito:");
+      println(`  ${cfg.Summary()}`);
+    },
+    Err(e) => println(`✕ Error inesperado: ${e}`)
+  }
+
+  // C. Caso de Error: Validación de Puerto Inválido
+  println("\n3. Probando validación de error con puerto inválido (70000)...");
+  let mut invalidBuilder = NewServerConfigBuilder();
+  let bInvalid = &invalidBuilder;
+
+  bInvalid.SetPort(70000);
+  let invalidResult = bInvalid.Build();
+
+  match invalidResult {
+    Ok(_) => println("✕ Error: Debería haber fallado la validación"),
+    Err(err) => println(`✓ Validación esperada capturada: "${err}"`)
+  }
+
+  println("\n==================================================");
+  println("  ✓ Builder v3 completado exitosamente.");
+  println("==================================================");
+};

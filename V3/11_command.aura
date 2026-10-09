@@ -1,0 +1,212 @@
+// =============================================================================
+// Patrón de Diseño: Command v3 (Estilo Idiomático Golang)
+// =============================================================================
+// Propósito:
+//   Encapsula una solicitud como un objeto independiente, permitiendo parametrizar
+//   clientes con diferentes solicitudes, mantener una pila de historial LIFO
+//   y ejecutar operaciones reversibles (Undo / Redo).
+//
+// Enfoque Golang en Aura Lang:
+//   - Interfaz `Command` con Duck Typing Estructural: métodos `Execute()`, `Undo()`, `Description()`.
+//   - Receptor (`TextDocument`) con métodos de mutación sobre su contenido.
+//   - Comandos concretos (`AppendTextCommand`, `ClearDocumentCommand`) con `__aura_type`
+//     para despacho polimórfico determinista.
+//   - Invocador (`CommandManager`) con historial de comandos en slice Go (`[]Command`),
+//     métodos `ExecuteCommand()` y `Undo()` gestionando la pila LIFO.
+// =============================================================================
+
+// 1. El Receptor (Receiver): Estado mutable del documento
+export struct TextDocument {
+  content: String
+};
+
+export fn NewTextDocument(): TextDocument => {
+  return { content: "" };
+};
+
+fn (d: TextDocument) GetContent(): String => d.content;
+
+fn (d: TextDocument) Append(text: String): Unit => {
+  if (d.content == "") {
+    d.content = text;
+  } else {
+    d.content = `${d.content} ${text}`;
+  }
+}
+
+fn (d: TextDocument) SetContent(newContent: String): Unit => {
+  d.content = newContent;
+}
+
+// 2. Interfaz Común del Comando (Duck Typing)
+export interface Command {
+  Execute(): Result<String, String>;
+  Undo(): Result<String, String>;
+  Description(): String;
+}
+
+// 3. Comando Concreto 1: Añadir Texto
+export struct AppendTextCommand {
+  __aura_type: String,
+  doc: TextDocument,
+  textToAdd: String,
+  previousContent: String
+};
+
+export fn NewAppendTextCommand(d: TextDocument, text: String): AppendTextCommand => {
+  return {
+    __aura_type: "AppendTextCommand",
+    doc: d,
+    textToAdd: text,
+    previousContent: ""
+  };
+};
+
+fn (c: AppendTextCommand) Description(): String => `Append("${c.textToAdd}")`;
+
+fn (c: AppendTextCommand) Execute(): Result<String, String> => {
+  c.previousContent = c.doc.content;
+  c.doc.Append(c.textToAdd);
+  Ok(`Texto '${c.textToAdd}' añadido. Contenido actual: "${c.doc.content}"`)
+}
+
+fn (c: AppendTextCommand) Undo(): Result<String, String> => {
+  c.doc.SetContent(c.previousContent);
+  Ok(`Deshecho '${c.textToAdd}'. Contenido restaurado: "${c.doc.content}"`)
+}
+
+// 4. Comando Concreto 2: Limpiar Documento
+export struct ClearDocumentCommand {
+  __aura_type: String,
+  doc: TextDocument,
+  savedContent: String
+};
+
+export fn NewClearDocumentCommand(d: TextDocument): ClearDocumentCommand => {
+  return {
+    __aura_type: "ClearDocumentCommand",
+    doc: d,
+    savedContent: ""
+  };
+};
+
+fn (c: ClearDocumentCommand) Description(): String => "ClearDocument";
+
+fn (c: ClearDocumentCommand) Execute(): Result<String, String> => {
+  c.savedContent = c.doc.content;
+  c.doc.SetContent("");
+  Ok(`Documento limpiado. Contenido actual: ""`)
+}
+
+fn (c: ClearDocumentCommand) Undo(): Result<String, String> => {
+  c.doc.SetContent(c.savedContent);
+  Ok(`Limpieza revertida. Contenido restaurado a: "${c.doc.content}"`)
+}
+
+// 5. El Invocador (Invoker / CommandManager): Gestiona Historial con Slices de Go
+export struct CommandManager {
+  __aura_type: String,
+  history: []Command
+};
+
+export fn NewCommandManager(): CommandManager => {
+  let emptyList: []Command = [];
+  return {
+    __aura_type: "CommandManager",
+    history: emptyList
+  };
+};
+
+fn (m: CommandManager) ExecuteCommand(cmd: Command): Result<String, String> => {
+  let res = cmd.Execute();
+  match res {
+    Ok(msg) => {
+      m.history = append(m.history, cmd);
+      Ok(msg)
+    },
+    Err(e) => Err(e)
+  }
+}
+
+fn (m: CommandManager) Undo(): Result<String, String> => {
+  let total = len(m.history);
+  if (total == 0) {
+    return Err("No hay comandos en el historial para deshacer");
+  }
+
+  // Extraer el último comando (Pila LIFO)
+  let lastCmd = m.history[total - 1];
+  m.history = m.history[:total - 1];
+
+  lastCmd.Undo()
+}
+
+fn (m: CommandManager) HistoryCount(): Int => len(m.history);
+
+// 6. Punto de Entrada Principal
+export fn main(): Unit => {
+  println("==================================================");
+  println("  PATRÓN COMMAND v3 (ESTILO GOLANG)");
+  println("==================================================");
+
+  let doc = NewTextDocument();
+  let manager = NewCommandManager();
+
+  println("1. Ejecución secuencial de comandos sobre el documento:");
+
+  let cmd1 = NewAppendTextCommand(doc, "Aura");
+  let res1 = manager.ExecuteCommand(cmd1);
+  match res1 {
+    Ok(m) => println(`  [Cmd 1] ✓ ${m}`),
+    Err(e) => println(`  ✕ ${e}`)
+  }
+
+  let cmd2 = NewAppendTextCommand(doc, "Language");
+  let res2 = manager.ExecuteCommand(cmd2);
+  match res2 {
+    Ok(m) => println(`  [Cmd 2] ✓ ${m}`),
+    Err(e) => println(`  ✕ ${e}`)
+  }
+
+  let cmd3 = NewAppendTextCommand(doc, "v3.0");
+  let res3 = manager.ExecuteCommand(cmd3);
+  match res3 {
+    Ok(m) => println(`  [Cmd 3] ✓ ${m}`),
+    Err(e) => println(`  ✕ ${e}`)
+  }
+
+  println(`\nEstado intermedio del documento: "${doc.GetContent()}" (Comandos en historial: ${manager.HistoryCount()})`);
+
+  // 2. Limpieza con comando reversible
+  println("\n2. Ejecutando comando destructivo ClearDocument:");
+  let cmdClear = NewClearDocumentCommand(doc);
+  let resClear = manager.ExecuteCommand(cmdClear);
+  match resClear {
+    Ok(m) => println(`  [Clear] ✓ ${m}`),
+    Err(e) => println(`  ✕ ${e}`)
+  }
+  println(`Estado tras Clear: "${doc.GetContent()}"`);
+
+  // 3. Demostración de Reversión (Undo en orden LIFO)
+  println("\n3. Deshaciendo operaciones (Pila LIFO de Undo):");
+
+  // Deshacer Clear
+  let undo1 = manager.Undo();
+  match undo1 {
+    Ok(m) => println(`  [Undo 1] ✓ ${m}`),
+    Err(e) => println(`  ✕ ${e}`)
+  }
+
+  // Deshacer Append("v3.0")
+  let undo2 = manager.Undo();
+  match undo2 {
+    Ok(m) => println(`  [Undo 2] ✓ ${m}`),
+    Err(e) => println(`  ✕ ${e}`)
+  }
+
+  println(`\nEstado final del documento tras Undo: "${doc.GetContent()}"`);
+
+  println("\n==================================================");
+  println("  ✓ Command v3 completado exitosamente.");
+  println("==================================================");
+};

@@ -1,0 +1,166 @@
+// =============================================================================
+// Patrón de Diseño: Proxy v3 (Estilo Idiomático Golang)
+// =============================================================================
+// Propósito:
+//   Proporciona un intermediario para controlar el acceso a un objeto,
+//   implementando almacenamiento en caché seguro para hilos o validación diferida.
+//
+// Enfoque Golang en Aura Lang:
+//   - Interfaz `WeatherService` con Duck Typing Estructural.
+//   - Sujeto Real (`RealWeatherService`) que simula latencia de red hacia satélites.
+//   - Proxy (`CachedWeatherProxy`) que almacena resultados en memoria, protegido con `Mutex`.
+//   - Métodos con receptor de puntero y `defer p.mu.unlock()` para concurrencia limpia.
+//   - Concurrencia masiva con múltiples Goroutines concurrentes y `WaitGroup`.
+// =============================================================================
+
+// 1. Interfaz Común del Servicio (Duck Typing)
+export interface WeatherService {
+  GetTemperature(city: String): Result<Float, String>;
+  ServiceIdentifier(): String;
+}
+
+// 2. Servicio Real (RealSubject): Operación de Red Lenta
+export struct RealWeatherService {
+  __aura_type: String,
+  satelliteStation: String
+};
+
+export fn NewRealWeatherService(station: String): RealWeatherService => {
+  {
+    __aura_type: "RealWeatherService",
+    satelliteStation: station
+  }
+};
+
+fn (s: RealWeatherService) ServiceIdentifier(): String => `RealService(${s.satelliteStation})`;
+
+fn (s: RealWeatherService) GetTemperature(city: String): Result<Float, String> => {
+  println(`      📡 [SATELLITE @ ${s.satelliteStation}] Consulta remota lenta para '${city}'...`);
+  if (city == "Santiago") {
+    return Ok(22.5);
+  }
+  if (city == "Buenos Aires") {
+    return Ok(24.8);
+  }
+  if (city == "Madrid") {
+    return Ok(18.2);
+  }
+  if (city == "Tokyo") {
+    return Ok(16.0);
+  }
+  Err(`Ciudad '${city}' no registrada en la estación meteorológica`)
+}
+
+// 3. Proxy de Caché Seguro (Thread-Safe Caching Proxy)
+export struct CachedWeatherProxy {
+  __aura_type: String,
+  realService: WeatherService,
+  cache: Map,
+  hits: Int,
+  misses: Int,
+  mu: Mutex
+};
+
+export fn NewCachedWeatherProxy(real: WeatherService): CachedWeatherProxy => {
+  {
+    __aura_type: "CachedWeatherProxy",
+    realService: real,
+    cache: Map.new(),
+    hits: 0,
+    misses: 0,
+    mu: Mutex.new()
+  }
+};
+
+fn (p: CachedWeatherProxy) ServiceIdentifier(): String => `ProxyCache -> ${p.realService.ServiceIdentifier()}`;
+
+fn (p: *CachedWeatherProxy) GetTemperature(city: String): Result<Float, String> => {
+  p.mu.lock();
+  defer p.mu.unlock();
+
+  // 1. Verificación de Caché HIT
+  if (p.cache.has(city)) {
+    p.hits = p.hits + 1;
+    let cachedVal = p.cache.get(city);
+    println(`   ⚡ [PROXY: CACHE-HIT] '${city}' recuperado de memoria: ${cachedVal}°C`);
+    return Ok(cachedVal);
+  }
+
+  // 2. Caché MISS: Delegación al servicio real
+  p.misses = p.misses + 1;
+  println(`   🔍 [PROXY: CACHE-MISS] '${city}' ausente en caché. Consultando al satélite...`);
+
+  let freshRes = p.realService.GetTemperature(city);
+  match freshRes {
+    Ok(temp) => {
+      p.cache.set(city, temp);
+      println(`   💾 [PROXY: STORE] Temperatura de '${city}' guardada en memoria (${temp}°C).`);
+      Ok(temp)
+    },
+    Err(e) => Err(e)
+  }
+}
+
+fn (p: *CachedWeatherProxy) CacheStats(): String => {
+  p.mu.lock();
+  defer p.mu.unlock();
+  `[Proxy Metrics] HITS: ${p.hits} | MISSES: ${p.misses} | Elementos en memoria: ${p.cache.size}`
+}
+
+// 4. Punto de Entrada Principal Concurrente
+export async fn main(): Task<Unit, String> => {
+  println("==================================================");
+  println("  PATRÓN PROXY v3 (ESTILO GOLANG)");
+  println("==================================================");
+
+  let realSatellite = NewRealWeatherService("NOAA-GEO-ORBIT-4");
+  let mut proxy = NewCachedWeatherProxy(realSatellite);
+  let pProxy = &proxy;
+
+  // A. Consultas Secuenciales (Verificando HIT y MISS)
+  println("1. Primera ronda de consultas (Llenado de Caché):");
+  let cities: []String = ["Santiago", "Madrid", "Tokyo"];
+
+  for c in cities {
+    let tRes = pProxy.GetTemperature(c);
+    match tRes {
+      Ok(temp) => println(`   ✓ Temp en ${c}: ${temp}°C\n`),
+      Err(e) => println(`   ✕ Error: ${e}\n`)
+    }
+  }
+
+  println("2. Segunda ronda de consultas (Demostrando Caché HITS O(1)):");
+  for c in cities {
+    let tRes = pProxy.GetTemperature(c);
+    match tRes {
+      Ok(temp) => println(`   ✓ Temp en ${c}: ${temp}°C\n`),
+      Err(e) => println(`   ✕ Error: ${e}\n`)
+    }
+  }
+
+  // B. Acceso Concurrente con Goroutines
+  println("3. Acceso concurrente multi-goroutine simulando clientes en paralelo:");
+  let wg = WaitGroup.new();
+  wg.add(4);
+
+  for i in [1, 2, 3, 4] {
+    go(fn(id: Int) => {
+      defer wg.done();
+      let res = pProxy.GetTemperature("Santiago");
+      match res {
+        Ok(t) => println(`   [Goroutine #${id}] Resuelta temperatura: ${t}°C`),
+        Err(e) => println(`   [Goroutine #${id}] Error: ${e}`)
+      }
+    })(i);
+  }
+
+  await wg.wait();
+
+  // C. Estadísticas del Proxy
+  println(`\n4. Balance Final del Proxy:`);
+  println(`   ${pProxy.CacheStats()}`);
+
+  println("\n==================================================");
+  println("  ✓ Proxy v3 completado exitosamente.");
+  println("==================================================");
+};

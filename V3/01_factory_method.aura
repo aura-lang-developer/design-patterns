@@ -1,0 +1,207 @@
+// =============================================================================
+// Patrón de Diseño: Factory Method v3 (Estilo Idiomático Golang)
+// =============================================================================
+// Propósito:
+//   Define una interfaz para crear objetos, permitiendo a las subclases o
+//   funciones de fábrica instanciar diferentes structs concretos según
+//   la configuración o parámetros en tiempo de ejecución.
+//
+// Enfoque Golang en Aura Lang:
+//   - Estructuras puras con campos tipados (`struct`).
+//   - Métodos con receptor (`fn (s: EmailSender) Send(...)`).
+//   - Duck Typing Estructural: La interfaz `NotificationSender` es satisfecha
+//     implícitamente por cualquier struct que posea los métodos requeridos.
+//   - Constructores canónicos `New<Type>()` que validan entradas.
+//   - Manejo explícito de errores con `Result<T, String>` (estilo `(T, error)`).
+//   - Slices nativos (`[]String`) para envío por lotes.
+// =============================================================================
+
+// 1. Interfaz Estructural Común (Go-Style Duck Typing)
+export interface NotificationSender {
+  Send(subject: String, body: String): Result<String, String>;
+  GetChannel(): String;
+}
+
+// 2. Structs Concretos de Notificación
+export struct EmailSender {
+  __aura_type: String,
+  recipientEmail: String,
+  smtpServer: String
+};
+
+export struct SmsSender {
+  __aura_type: String,
+  phoneNumber: String,
+  carrierGateway: String
+};
+
+export struct SlackSender {
+  __aura_type: String,
+  channel: String,
+  botToken: String
+};
+
+export struct WebhookSender {
+  __aura_type: String,
+  targetUrl: String,
+  authToken: String
+};
+
+// 3. Constructores Idiomáticos (Estilo Go `New...`)
+export fn NewEmailSender(email: String, server: String): EmailSender => {
+  {
+    __aura_type: "EmailSender",
+    recipientEmail: email,
+    smtpServer: server
+  }
+};
+
+export fn NewSmsSender(phone: String, gateway: String): SmsSender => {
+  {
+    __aura_type: "SmsSender",
+    phoneNumber: phone,
+    carrierGateway: gateway
+  }
+};
+
+export fn NewSlackSender(channel: String, token: String): SlackSender => {
+  {
+    __aura_type: "SlackSender",
+    channel: channel,
+    botToken: token
+  }
+};
+
+export fn NewWebhookSender(url: String, token: String): WebhookSender => {
+  {
+    __aura_type: "WebhookSender",
+    targetUrl: url,
+    authToken: token
+  }
+};
+
+// 4. Métodos con Receptor para EmailSender
+fn (s: EmailSender) Send(subject: String, body: String): Result<String, String> => {
+  if (s.recipientEmail == "") {
+    return Err("Email recipient cannot be empty");
+  }
+  let msg = `📧 [EMAIL via ${s.smtpServer}] To: ${s.recipientEmail} | Subject: "${subject}" | Body: ${body}`;
+  Ok(msg)
+}
+
+fn (s: EmailSender) GetChannel(): String => "EMAIL";
+
+// 5. Métodos con Receptor para SmsSender
+fn (s: SmsSender) Send(subject: String, body: String): Result<String, String> => {
+  if (s.phoneNumber == "") {
+    return Err("Phone number cannot be empty");
+  }
+  let msg = `📱 [SMS via ${s.carrierGateway}] Phone: ${s.phoneNumber} | Text: [${subject}] ${body}`;
+  Ok(msg)
+}
+
+fn (s: SmsSender) GetChannel(): String => "SMS";
+
+// 6. Métodos con Receptor para SlackSender
+fn (s: SlackSender) Send(subject: String, body: String): Result<String, String> => {
+  if (s.channel == "") {
+    return Err("Slack channel cannot be empty");
+  }
+  let msg = `💬 [SLACK #${s.channel}] *${subject}*: ${body}`;
+  Ok(msg)
+}
+
+fn (s: SlackSender) GetChannel(): String => "SLACK";
+
+// 7. Métodos con Receptor para WebhookSender
+fn (s: WebhookSender) Send(subject: String, body: String): Result<String, String> => {
+  if (s.targetUrl == "") {
+    return Err("Webhook URL cannot be empty");
+  }
+  let msg = `🌐 [WEBHOOK POST ${s.targetUrl}] Payload: {"title":"${subject}","content":"${body}"}`;
+  Ok(msg)
+}
+
+fn (s: WebhookSender) GetChannel(): String => "WEBHOOK";
+
+// 8. Factory Method Principal (Fábrica Centralizada Go-Style)
+export fn NewNotificationSender(channelKind: String, destination: String): Result<NotificationSender, String> => {
+  if (channelKind == "email") {
+    return Ok(NewEmailSender(destination, "smtp.production.internal:587"));
+  }
+  if (channelKind == "sms") {
+    return Ok(NewSmsSender(destination, "telco-gateway-v2"));
+  }
+  if (channelKind == "slack") {
+    return Ok(NewSlackSender(destination, "xoxb-aurastack-94821"));
+  }
+  if (channelKind == "webhook") {
+    return Ok(NewWebhookSender(destination, "bearer-jwt-token-sec"));
+  }
+  Err(`Canal de notificación desconocido o no soportado: '${channelKind}'`)
+};
+
+// 9. Función de Despacho Polimórfico (Acepta cualquier implementación de la interfaz)
+export fn DispatchNotification(sender: NotificationSender, title: String, content: String): Result<String, String> => {
+  println(`[Dispatcher] Despachando notificación usando canal ${sender.GetChannel()}...`);
+  sender.Send(title, content)
+};
+
+// 10. Función Principal / Punto de Entrada
+export fn main(): Unit => {
+  println("==================================================");
+  println("  PATRÓN FACTORY METHOD v3 (ESTILO GOLANG)");
+  println("==================================================");
+
+  // A. Construcción directa mediante constructores concretos New...
+  let emailWorker = NewEmailSender("infra@aura-lang.org", "smtp.office365.com");
+  let smsWorker = NewSmsSender("+56987654321", "entel-chile-gateway");
+
+  let r1 = DispatchNotification(emailWorker, "Cluster Alert", "Worker pool autoscaled to 16 nodes");
+  match r1 {
+    Ok(msg) => println(`✓ ${msg}`),
+    Err(e) => println(`✕ Error: ${e}`)
+  }
+
+  let r2 = DispatchNotification(smsWorker, "2FA Code", "Su código de seguridad Aura es 859302");
+  match r2 {
+    Ok(msg) => println(`✓ ${msg}`),
+    Err(e) => println(`✕ Error: ${e}`)
+  }
+
+  // B. Creación dinámica mediante el Factory Method
+  println("\n--- Creación Dinámica con Factory Method ---");
+
+  let channels: []String = ["slack", "webhook", "email", "invalid_type"];
+  let destinations: []String = [
+    "production-alerts",
+    "https://api.monitoring.internal/hooks",
+    "devops@auracloud.io",
+    "unknown-target"
+  ];
+
+  let mut i = 0;
+  for ch in channels {
+    let dest = destinations[i];
+    println(`\nSolicitando sender para canal: '${ch}' -> destino: '${dest}'`);
+    let senderRes = NewNotificationSender(ch, dest);
+
+    match senderRes {
+      Ok(sender) => {
+        let sent = sender.Send("Evento Programado", "Verificación de latencia exitosa");
+        match sent {
+          Ok(m) => println(`✓ ${m}`),
+          Err(err) => println(`✕ Error en envío: ${err}`)
+        }
+      },
+      Err(err) => {
+        println(`⚠️ Fallo esperado de fábrica: ${err}`);
+      }
+    }
+    i = i + 1;
+  }
+
+  println("\n==================================================");
+  println("  ✓ Factory Method v3 completado exitosamente.");
+  println("==================================================");
+};

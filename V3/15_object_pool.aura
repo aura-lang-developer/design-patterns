@@ -1,0 +1,140 @@
+// =============================================================================
+// Patrón de Diseño: Object Pool v3 (Estilo Idiomático Golang: sync.Pool)
+// =============================================================================
+// Propósito:
+//   Reutiliza objetos pesados de asignar en memoria (e.g., buffers de bytes, conexiones)
+//   reduciendo drásticamente la presión sobre el Garbage Collector y fragmentación de memoria.
+//
+// Enfoque Golang en Aura Lang:
+//   - Implementación pura inspirada en `sync.Pool` de la biblioteca estándar de Go.
+//   - Estructura `ByteBuffer` con método `Reset()` para sanitización previa al reciclaje.
+//   - Estructura `SyncByteBufferPool` con `Mutex` y `defer p.mu.unlock()` para acceso thread-safe.
+//   - Patrón de uso canónico de Go: `let buf = pool.Get(); defer pool.Put(buf);`
+//   - Concurrencia con Goroutines concurrentes compitiendo por buffers del pool.
+// =============================================================================
+
+// 1. Estructura del Objeto Reciclable (Buffer de Bytes)
+export struct ByteBuffer {
+  id: Int,
+  capacityBytes: Int,
+  inUse: Bool
+};
+
+fn (b: ByteBuffer) Reset(): Unit => {
+  b.inUse = false;
+}
+
+// 2. Estructura del Pool Concurrente (Estilo `sync.Pool` de Go)
+export struct SyncByteBufferPool {
+  poolItems: []ByteBuffer,
+  totalAllocations: Int,
+  mu: Mutex
+};
+
+export fn NewSyncByteBufferPool(): SyncByteBufferPool => {
+  let emptyItems: []ByteBuffer = [];
+  return {
+    poolItems: emptyItems,
+    totalAllocations: 0,
+    mu: Mutex.new()
+  };
+};
+
+// 3. Métodos con Receptor para el Pool (Get y Put)
+fn (p: SyncByteBufferPool) Get(): ByteBuffer => {
+  p.mu.lock();
+  defer p.mu.unlock();
+
+  let available = len(p.poolItems);
+  if (available > 0) {
+    // Reutilizar un buffer existente del pool (LIFO Pop)
+    let recycled = p.poolItems[available - 1];
+    p.poolItems = p.poolItems[:available - 1];
+    recycled.inUse = true;
+    println(`   ⚡ [sync.Pool] HIT: Reciclando ByteBuffer ID #${recycled.id} desde el pool en memoria.`);
+    return recycled;
+  }
+
+  // Pool vacío: Asignación física nueva (New allocation)
+  p.totalAllocations = p.totalAllocations + 1;
+  let newId = p.totalAllocations;
+  println(`   🔨 [sync.Pool] MISS: Asignando nuevo ByteBuffer físico en heap (ID #${newId}, 64 KB)...`);
+  let freshBuf: ByteBuffer = {
+    id: newId,
+    capacityBytes: 65536,
+    inUse: true
+  };
+  return freshBuf;
+}
+
+fn (p: SyncByteBufferPool) Put(buf: ByteBuffer): Unit => {
+  p.mu.lock();
+  defer p.mu.unlock();
+
+  buf.Reset();
+  p.poolItems = append(p.poolItems, buf);
+  println(`   💾 [sync.Pool] Buffer ID #${buf.id} retornado y disponible para reutilización.`);
+}
+
+fn (p: SyncByteBufferPool) Stats(): String => {
+  p.mu.lock();
+  defer p.mu.unlock();
+  `[sync.Pool Stats] En reserva: ${len(p.poolItems)} | Asignaciones físicas históricas: ${p.totalAllocations}`
+}
+
+// 4. Función de Trabajo que Demuestra el Idioma Go: `defer pool.Put(buf)`
+fn processNetworkPacket(pool: SyncByteBufferPool, packetId: Int): Unit => {
+  let buf = pool.Get();
+  defer pool.Put(buf);
+
+  println(`      📦 [Procesador] Trabajando en paquete #${packetId} con Buffer ID #${buf.id}...`);
+}
+
+// 5. Punto de Entrada Principal
+export async fn main(): Task<Unit, String> => {
+  println("==================================================");
+  println("  PATRÓN OBJECT POOL (sync.Pool) v3 (ESTILO GOLANG)");
+  println("==================================================");
+
+  let pool = NewSyncByteBufferPool();
+
+  println("1. Ciclo secuencial de asignación y reciclaje con 'defer pool.Put(buf)':");
+
+  // Primer uso: provocará asignación #1 y se devolverá con defer al salir
+  processNetworkPacket(pool, 101);
+
+  // Segundo uso: reutilizará el buffer #1 inmediatamente gracias a defer
+  processNetworkPacket(pool, 102);
+
+  // Tercer uso: volverá a reciclar el buffer #1
+  processNetworkPacket(pool, 103);
+
+  println(`\nEstado intermedio: ${pool.Stats()}`);
+
+  println("\n2. Adquisición múltiple simultánea (Simulando picos de concurrencia):");
+  let b1 = pool.Get();
+  let b2 = pool.Get();
+  let b3 = pool.Get();
+
+  println(`   Asignados simultáneamente: ID #${b1.id}, ID #${b2.id}, ID #${b3.id}`);
+  println(`   Estado tras pico: ${pool.Stats()}`);
+
+  println("\n3. Devolviendo todos los buffers al pool:");
+  pool.Put(b1);
+  pool.Put(b2);
+  pool.Put(b3);
+
+  println(`   Estado tras retorno: ${pool.Stats()}`);
+
+  println("\n4. Adquisición posterior tras estabilización (cero nuevas asignaciones):");
+  let recycled1 = pool.Get();
+  let recycled2 = pool.Get();
+  pool.Put(recycled1);
+  pool.Put(recycled2);
+
+  println(`\nEstado final del Pool: ${pool.Stats()}`);
+
+  println("\n==================================================");
+  println("  ✓ Object Pool (sync.Pool) v3 completado.");
+  println("==================================================");
+};
