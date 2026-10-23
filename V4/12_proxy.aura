@@ -1,0 +1,55 @@
+// =============================================================================
+// Patrón de Diseño 12: Proxy (Proxy de Caché)
+// Categoría: Estructural
+// =============================================================================
+
+export interface QueryService {
+  query(sql: String): String;
+}
+
+export fn createDatabaseService(): QueryService => {
+  {
+    query: (sql: String): String => {
+      println(`  [Disco/Red] Ejecutando consulta pesada en Base de Datos: "${sql}"`);
+      `Resultado de [${sql}]`
+    }
+  }
+};
+
+export fn createCachedProxy(realService: QueryService): QueryService => {
+  let mut cacheKey: String = "";
+  let mut cachedResult: String = "";
+  let mut hasCache: Bool = false;
+
+  {
+    query: (sql: String): String => {
+      if (hasCache && cacheKey == sql) {
+        `  [Caché RAM] Retornando valor en memoria: ${cachedResult}`
+      } else {
+        let res = realService.query(sql);
+        cacheKey = sql;
+        cachedResult = res;
+        hasCache = true;
+        `  [Caché Miss] Guardado: ${res}`
+      }
+    }
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  12. Patrón Proxy de Caché");
+  println("==================================================");
+
+  let db = createDatabaseService();
+  let proxy = createCachedProxy(db);
+
+  let q1 = "SELECT * FROM users WHERE active = 1";
+  println(proxy.query(q1));
+  println(proxy.query(q1));
+  println(proxy.query("SELECT COUNT(*) FROM orders"));
+  println(proxy.query("SELECT COUNT(*) FROM orders"));
+
+  println("✓ Patrón 12 finalizado con éxito.
+");
+};

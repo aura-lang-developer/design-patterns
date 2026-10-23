@@ -1,0 +1,41 @@
+// =============================================================================
+// Patrón de Diseño 01: Factory Method (Método de Fábrica)
+// Categoría: Creacional
+// =============================================================================
+
+export type Message =
+  | Email { to: String, subject: String }
+  | SMS { phone: String, body: String }
+  | Push { deviceToken: String, payload: String };
+
+export fn createMessage(kind: String, dest: String, content: String): Message => {
+  match kind {
+    "email" => Message.Email({ to: dest, subject: content }),
+    "sms" => Message.SMS({ phone: dest, body: content }),
+    _ => Message.Push({ deviceToken: dest, payload: content })
+  }
+};
+
+export fn deliver(m: Message): String => {
+  match m {
+    Email { to, subject } => `[Email] Enviando correo a ${to} con asunto: "${subject}"`,
+    SMS { phone, body } => `[SMS] Enviando SMS al numero ${phone}: "${body}"`,
+    Push { deviceToken, payload } => `[Push] Notificacion Push al token ${deviceToken}: "${payload}"`
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  01. Patrón Factory Method");
+  println("==================================================");
+
+  let msg1 = createMessage("email", "dev@aura.lang", "Compilador v0.8.1 liberado");
+  let msg2 = createMessage("sms", "+56987654321", "Tu código OTP es 4819");
+  let msg3 = createMessage("push", "tok_xyz987", "Tienes un nuevo mensaje");
+
+  println(deliver(msg1));
+  println(deliver(msg2));
+  println(deliver(msg3));
+  println("✓ Patrón 01 finalizado con éxito.
+");
+};

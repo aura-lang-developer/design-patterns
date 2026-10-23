@@ -1,0 +1,38 @@
+// =============================================================================
+// Patrón de Diseño 43: Monadic Result (Manejo de Errores Funcional)
+// Categoría: Funcional
+// =============================================================================
+
+export fn parseNumber(str: String): Result<Int, String> => {
+  if (str == "10") { Ok(10) }
+  else if (str == "20") { Ok(20) }
+  else { Err(`No se pudo parsear el número: "${str}"`) }
+};
+
+export fn safeDivide(numerator: Int, denominator: Int): Result<Int, String> => {
+  if (denominator == 0) {
+    Err("División por cero no permitida")
+  } else {
+    Ok(numerator / denominator)
+  }
+};
+
+export fn computeCalculation(input: String): Result<Int, String> => {
+  match parseNumber(input) {
+    Ok(num) => safeDivide(100, num),
+    Err(e) => Err(e)
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  43. Patrón Monadic Result");
+  println("==================================================");
+
+  println(`Cálculo con "10": ${computeCalculation("10")}`);
+  println(`Cálculo con "0": ${safeDivide(100, 0)}`);
+  println(`Cálculo con "texto_invalido": ${computeCalculation("texto_invalido")}`);
+
+  println("✓ Patrón 43 finalizado con éxito.
+");
+};

@@ -1,0 +1,73 @@
+// =============================================================================
+// Patrón de Diseño 39: Saga (Transacciones Distribuidas con Compensación)
+// Categoría: Arquitectónico
+// =============================================================================
+
+export interface SagaStep {
+  name(): String;
+  execute(): Result<String, String>;
+  compensate(): String;
+}
+
+export fn runSaga(steps: List<SagaStep>): Result<String, String> => {
+  let mut executedSteps: List<SagaStep> = [];
+
+  let mut failed: Option<String> = None;
+
+  for step in steps {
+    if (failed == None) {
+      match step.execute() {
+        Ok(msg) => {
+          println(`  ✓ Paso completado: [${step.name()}] -> ${msg}`);
+          let mut updated: List<SagaStep> = executedSteps;
+          updated.push(step);
+          executedSteps = updated;
+        },
+        Err(err) => {
+          println(`  ❌ Fallo en paso [${step.name()}]: ${err}`);
+          println("  🔄 Iniciando compensación en reversa (Rollback de la Saga)...");
+          for executed in executedSteps {
+            println(`    -> Compensando: ${executed.compensate()}`);
+          }
+          failed = Some(`Saga abortada en [${step.name()}]`);
+        }
+      }
+    }
+  }
+
+  match failed {
+    Some(err) => Err(err),
+    None => Ok("Saga distribuida completada exitosamente")
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  39. Patrón Saga");
+  println("==================================================");
+
+  let step1: SagaStep = {
+    name: (): String => "Reservar Vuelo",
+    execute: (): Result<String, String> => Ok("Vuelo #734 reservado"),
+    compensate: (): String => "Cancelando reserva de vuelo"
+  };
+
+  let step2: SagaStep = {
+    name: (): String => "Reservar Hotel",
+    execute: (): Result<String, String> => Ok("Hotel Hilton reservado"),
+    compensate: (): String => "Cancelando reserva de hotel"
+  };
+
+  let step3: SagaStep = {
+    name: (): String => "Procesar Pago",
+    execute: (): Result<String, String> => Err("Tarjeta rechazada por fondos insuficientes"),
+    compensate: (): String => "No aplica compensación"
+  };
+
+  let steps: List<SagaStep> = [step1, step2, step3];
+  let outcome = runSaga(steps);
+  println(`Resultado final: ${outcome}`);
+
+  println("✓ Patrón 39 finalizado con éxito.
+");
+};

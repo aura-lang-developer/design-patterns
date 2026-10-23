@@ -1,0 +1,55 @@
+// =============================================================================
+// Patrón de Diseño 33: Unit of Work (Unidad de Trabajo)
+// Categoría: Arquitectónico
+// =============================================================================
+
+export interface UnitOfWork {
+  registerNew(entity: String): Unit;
+  registerDirty(entity: String): Unit;
+  commit(): String;
+  rollback(): String;
+}
+
+export fn createUnitOfWork(): UnitOfWork => {
+  let mut newItems: List<String> = [];
+  let mut dirtyItems: List<String> = [];
+
+  {
+    registerNew: (entity: String): Unit => {
+      let mut updated: List<String> = newItems;
+      updated.push(entity);
+      newItems = updated;
+    },
+    registerDirty: (entity: String): Unit => {
+      let mut updated: List<String> = dirtyItems;
+      updated.push(entity);
+      dirtyItems = updated;
+    },
+    commit: (): String => {
+      let msg = `Commit Exitoso de cambios agrupados`;
+      newItems = [];
+      dirtyItems = [];
+      msg
+    },
+    rollback: (): String => {
+      newItems = [];
+      dirtyItems = [];
+      "Rollback ejecutado: cambios descartados"
+    }
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  33. Patrón Unit of Work");
+  println("==================================================");
+
+  let uow = createUnitOfWork();
+  uow.registerNew("Cliente #101");
+  uow.registerNew("Cliente #102");
+  uow.registerDirty("Cliente #80 (email modificado)");
+
+  println(uow.commit());
+  println("✓ Patrón 33 finalizado con éxito.
+");
+};

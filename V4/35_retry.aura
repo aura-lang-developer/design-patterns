@@ -1,0 +1,55 @@
+// =============================================================================
+// Patrón de Diseño 35: Retry (Reintento de Operaciones)
+// Categoría: Resiliencia
+// =============================================================================
+
+export interface FallibleAction {
+  attempt(step: Int): Result<String, String>;
+}
+
+export fn retryOperation(maxAttempts: Int, action: FallibleAction): Result<String, String> => {
+  let mut current = 1;
+  let mut lastErr = "Operación no ejecutada";
+
+  let mut successResult: Option<String> = None;
+  while (current <= maxAttempts && successResult == None) {
+    println(`  [Intento ${current}/${maxAttempts}] Ejecutando acción...`);
+    match action.attempt(current) {
+      Ok(res) => {
+        successResult = Some(res);
+      },
+      Err(err) => {
+        lastErr = err;
+        current = current + 1;
+      }
+    }
+  }
+  match successResult {
+    Some(s) => Ok(s),
+    None => Err(`Falló tras ${maxAttempts} intentos. Último error: ${lastErr}`)
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  35. Patrón Retry");
+  println("==================================================");
+
+  let unstableService: FallibleAction = {
+    attempt: (step: Int): Result<String, String> => {
+      if (step < 3) {
+        Err("Timeout de conexión temporal")
+      } else {
+        Ok("Datos obtenidos satisfactoriamente")
+      }
+    }
+  };
+
+  match retryOperation(4, unstableService) {
+    Ok(data) => println(`Resultado Exitoso: ${data}`),
+    Err(err) => println(`Fallo total: ${err}`)
+  };
+
+  println("✓ Patrón 35 finalizado con éxito.
+");
+};

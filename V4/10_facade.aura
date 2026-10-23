@@ -1,0 +1,54 @@
+// =============================================================================
+// Patrón de Diseño 10: Facade (Fachada)
+// Categoría: Estructural
+// =============================================================================
+
+export interface VideoDecoder {
+  load(file: String): String;
+}
+
+export interface AudioMixer {
+  normalize(): String;
+}
+
+export interface SubtitleRenderer {
+  syncTrack(lang: String): String;
+}
+
+export interface MediaCenterFacade {
+  playMovie(fileName: String, language: String): List<String>;
+}
+
+export fn createMediaFacade(): MediaCenterFacade => {
+  let decoder: VideoDecoder = { load: (file: String): String => `Decodificando video stream desde "${file}" en formato H.265` };
+  let mixer: AudioMixer = { normalize: (): String => "Mezclando canales 5.1 y normalizando volumen" };
+  let subs: SubtitleRenderer = { syncTrack: (lang: String): String => `Sincronizando subtítulos en idioma: [${lang}]` };
+
+  {
+    playMovie: (fileName: String, language: String): List<String> => {
+      let steps: List<String> = [
+        decoder.load(fileName),
+        mixer.normalize(),
+        subs.syncTrack(language),
+        "▶ Reproduciendo contenido multimedia en pantalla completa."
+      ];
+      steps
+    }
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  10. Patrón Facade");
+  println("==================================================");
+
+  let player = createMediaFacade();
+  let log = player.playMovie("matrix_resurrections.mkv", "Español Latino");
+
+  for step in log {
+    println(`  -> ${step}`);
+  }
+
+  println("✓ Patrón 10 finalizado con éxito.
+");
+};

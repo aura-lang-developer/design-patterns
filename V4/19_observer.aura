@@ -1,0 +1,55 @@
+// =============================================================================
+// Patrón de Diseño 19: Observer (Observador / Publicador-Suscriptor)
+// Categoría: Comportamiento
+// =============================================================================
+
+export interface Observer {
+  notify(stockSymbol: String, price: Float): Unit;
+}
+
+export interface StockTicker {
+  attach(obs: Observer): Unit;
+  updatePrice(symbol: String, price: Float): Unit;
+}
+
+export fn createStockTicker(): StockTicker => {
+  let mut observers: List<Observer> = [];
+
+  {
+    attach: (obs: Observer): Unit => {
+      let mut updated: List<Observer> = observers;
+      updated.push(obs);
+      observers = updated;
+    },
+    updatePrice: (symbol: String, price: Float): Unit => {
+      for o in observers {
+        o.notify(symbol, price);
+      }
+    }
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  19. Patrón Observer");
+  println("==================================================");
+
+  let ticker = createStockTicker();
+
+  let mobileAlert: Observer = {
+    notify: (sym: String, p: Float): Unit => { println(`  [Notificación Móvil] Acción ${sym} ahora vale $${p}`); }
+  };
+
+  let analyticsBot: Observer = {
+    notify: (sym: String, p: Float): Unit => { println(`  [Analytics Bot] Registrando métrica de mercado para ${sym} a $${p}`); }
+  };
+
+  ticker.attach(mobileAlert);
+  ticker.attach(analyticsBot);
+
+  ticker.updatePrice("AAPL", 182.50);
+  ticker.updatePrice("GOOGL", 140.20);
+
+  println("✓ Patrón 19 finalizado con éxito.
+");
+};

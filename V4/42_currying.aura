@@ -1,0 +1,41 @@
+// =============================================================================
+// Patrón de Diseño 42: Currying & Partial Application
+// Categoría: Funcional
+// =============================================================================
+
+export interface UnaryFloatOp {
+  apply(x: Float): Float;
+}
+
+export fn makeDiscountCalculator(discountPercent: Float): UnaryFloatOp => {
+  {
+    apply: (price: Float): Float => price * (1.0 - (discountPercent / 100.0))
+  }
+};
+
+export fn makeTaxAdder(taxPercent: Float): UnaryFloatOp => {
+  {
+    apply: (amount: Float): Float => amount * (1.0 + (taxPercent / 100.0))
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  42. Patrón Currying & Partial Application");
+  println("==================================================");
+
+  let blackFridaySale = makeDiscountCalculator(30.0);
+  let summerSale = makeDiscountCalculator(15.0);
+  let applyVat = makeTaxAdder(19.0);
+
+  let original = 100.0;
+  let bfPrice = applyVat.apply(blackFridaySale.apply(original));
+  let summerPrice = applyVat.apply(summerSale.apply(original));
+
+  println(`Precio Original: $${original}`);
+  println(`Black Friday (30% off + 19% IVA): $${bfPrice}`);
+  println(`Summer Sale (15% off + 19% IVA): $${summerPrice}`);
+
+  println("✓ Patrón 42 finalizado con éxito.
+");
+};

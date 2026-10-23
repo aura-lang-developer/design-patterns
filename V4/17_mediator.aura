@@ -1,0 +1,51 @@
+// =============================================================================
+// Patrón de Diseño 17: Mediator (Mediador)
+// Categoría: Comportamiento
+// =============================================================================
+
+export interface ChatMediator {
+  sendMessage(sender: String, message: String): Unit;
+  register(user: String): Unit;
+}
+
+export fn createChatRoom(): ChatMediator => {
+  let mut participants: List<String> = [];
+
+  {
+    register: (user: String): Unit => {
+      let mut updated: List<String> = participants;
+      updated.push(user);
+      participants = updated;
+      println(`[SALA] ${user} se ha unido a la sala de conversación.`);
+    },
+    sendMessage: (sender: String, message: String): Unit => {
+      for user in participants {
+        if (user != sender) {
+          println(`  -> Para [${user}] de [${sender}]: "${message}"`);
+        }
+      }
+    }
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  17. Patrón Mediator");
+  println("==================================================");
+
+  let chat = createChatRoom();
+  chat.register("Alice");
+  chat.register("Bob");
+  chat.register("Charlie");
+
+  println("
+Alice envía un mensaje:");
+  chat.sendMessage("Alice", "¡Hola equipo, el nuevo sprint comienza hoy!");
+
+  println("
+Bob responde:");
+  chat.sendMessage("Bob", "Entendido Alice, revisando los tickets de Jira.");
+
+  println("✓ Patrón 17 finalizado con éxito.
+");
+};

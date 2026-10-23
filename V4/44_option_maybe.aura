@@ -1,0 +1,45 @@
+// =============================================================================
+// Patrón de Diseño 44: Option / Maybe
+// Categoría: Funcional
+// =============================================================================
+
+export type UserEmail = {
+  address: String,
+  verified: Bool
+};
+
+export fn findUserEmail(userId: Int): Option<UserEmail> => {
+  if (userId == 1) {
+    Some({ address: "contacto@aura.dev", verified: true })
+  } else if (userId == 2) {
+    Some({ address: "unverified@test.org", verified: false })
+  } else {
+    None
+  }
+};
+
+export fn sendWelcomeIfVerified(userId: Int): String => {
+  match findUserEmail(userId) {
+    Some(email) => {
+      if (email.verified) {
+        `Bienvenida enviada a ${email.address}`
+      } else {
+        `Usuario ${userId} tiene correo sin verificar`
+      }
+    },
+    None => `Usuario ${userId} no encontrado en base de datos`
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  44. Patrón Option / Maybe");
+  println("==================================================");
+
+  println(sendWelcomeIfVerified(1));
+  println(sendWelcomeIfVerified(2));
+  println(sendWelcomeIfVerified(99));
+
+  println("✓ Patrón 44 finalizado con éxito.
+");
+};

@@ -1,0 +1,44 @@
+// =============================================================================
+// Patrón de Diseño 45: Closure Factory (Fábrica de Cierres / Estado Privado)
+// Categoría: Funcional
+// =============================================================================
+
+export interface Counter {
+  increment(): Int;
+  decrement(): Int;
+  getValue(): Int;
+}
+
+export fn createCounter(initial: Int): Counter => {
+  let mut count = initial;
+
+  {
+    increment: (): Int => {
+      count = count + 1;
+      count
+    },
+    decrement: (): Int => {
+      count = count - 1;
+      count
+    },
+    getValue: (): Int => count
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  45. Patrón Closure Factory");
+  println("==================================================");
+
+  let c1 = createCounter(0);
+  let c2 = createCounter(100);
+
+  println(`Contador 1 inc: ${c1.increment()}`);
+  println(`Contador 1 inc: ${c1.increment()}`);
+  println(`Contador 2 inc: ${c2.increment()}`);
+  println(`Contador 1 dec: ${c1.decrement()}`);
+  println(`Valores finales: C1 = ${c1.getValue()}, C2 = ${c2.getValue()}`);
+
+  println("✓ Patrón 45 finalizado con éxito.
+");
+};

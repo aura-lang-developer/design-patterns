@@ -1,0 +1,65 @@
+// =============================================================================
+// Patrón de Diseño 15: Interpreter (Intérprete AST)
+// Categoría: Comportamiento
+// =============================================================================
+
+export type Expr =
+  | Constant { val: Bool }
+  | Var { name: String }
+  | AndExpr { left: Expr, right: Expr }
+  | OrExpr { left: Expr, right: Expr };
+
+export interface EvaluatorContext {
+  lookup(varName: String): Bool;
+}
+
+export fn evaluate(expr: Expr, ctx: EvaluatorContext): Bool => {
+  match expr {
+    Constant { val } => val,
+    Var { name } => ctx.lookup(name),
+    AndExpr { left, right } => evaluate(left, ctx) && evaluate(right, ctx),
+    OrExpr { left, right } => evaluate(left, ctx) || evaluate(right, ctx)
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  15. Patrón Interpreter");
+  println("==================================================");
+
+  let ast = Expr.OrExpr({
+    left: Expr.AndExpr({
+      left: Expr.Var({ name: "isAuthenticated" }),
+      right: Expr.Var({ name: "hasRole" })
+    }),
+    right: Expr.Var({ name: "isSuperAdmin" })
+  });
+
+  let ctxUser: EvaluatorContext = {
+    lookup: (name: String): Bool => {
+      match name {
+        "isAuthenticated" => true,
+        "hasRole" => false,
+        "isSuperAdmin" => false,
+        _ => false
+      }
+    }
+  };
+
+  let ctxAdmin: EvaluatorContext = {
+    lookup: (name: String): Bool => {
+      match name {
+        "isAuthenticated" => false,
+        "hasRole" => false,
+        "isSuperAdmin" => true,
+        _ => false
+      }
+    }
+  };
+
+  println(`Evaluación usuario estándar: ${evaluate(ast, ctxUser)}`);
+  println(`Evaluación super admin: ${evaluate(ast, ctxAdmin)}`);
+
+  println("✓ Patrón 15 finalizado con éxito.
+");
+};

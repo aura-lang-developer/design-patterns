@@ -1,0 +1,42 @@
+// =============================================================================
+// Patrón de Diseño 28: Future / Promise (Futuro y Promesa)
+// Categoría: Concurrencia
+// =============================================================================
+
+export interface FutureInt {
+  get(): Int;
+}
+
+export fn asyncComputeInt(multiplier: Int): FutureInt => {
+  let chan: Channel<Int> = Channel.make(1);
+  spawn {
+    let result = 42 * multiplier;
+    chan <- result;
+  };
+
+  {
+    get: (): Int => {
+      let msg = <-chan;
+      match msg {
+        Some(val) => val,
+        None => 0
+      }
+    }
+  }
+};
+
+export async fn main(): Task<Unit, String> => {
+  println("==================================================");
+  println("  28. Patrón Future / Promise");
+  println("==================================================");
+
+  println("Iniciando tarea pesada en segundo plano...");
+  let fut = asyncComputeInt(10);
+
+  println("Haciendo otras cosas en el hilo principal mientras el cálculo se ejecuta...");
+  let value = fut.get();
+  println(`Resultado obtenido del Future: ${value}`);
+
+  println("✓ Patrón 28 finalizado con éxito.
+");
+};

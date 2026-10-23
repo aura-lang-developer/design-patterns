@@ -1,0 +1,56 @@
+// =============================================================================
+// Patrón de Diseño 32: Repository (Repositorio de Datos)
+// Categoría: Arquitectónico
+// =============================================================================
+
+export type Product = {
+  id: Int,
+  title: String,
+  price: Float
+};
+
+export interface ProductRepository {
+  add(p: Product): Unit;
+  findById(id: Int): Option<Product>;
+  listAll(): List<Product>;
+}
+
+export fn createInMemoryRepository(): ProductRepository => {
+  let mut storage: List<Product> = [];
+
+  {
+    add: (p: Product): Unit => {
+      let mut updated: List<Product> = storage;
+      updated.push(p);
+      storage = updated;
+    },
+    findById: (id: Int): Option<Product> => {
+      let mut found: Option<Product> = None;
+      for p in storage {
+        if (p.id == id) {
+          found = Some(p);
+        }
+      }
+      found
+    },
+    listAll: (): List<Product> => storage
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  32. Patrón Repository");
+  println("==================================================");
+
+  let repo = createInMemoryRepository();
+  repo.add({ id: 1, title: "Teclado Mecánico", price: 89.90 });
+  repo.add({ id: 2, title: "Monitor 4K", price: 349.50 });
+
+  match repo.findById(1) {
+    Some(prod) => println(`Producto 1: ${prod.title} ($${prod.price})`),
+    None => println("No encontrado")
+  };
+
+  println("✓ Patrón 32 finalizado con éxito.
+");
+};

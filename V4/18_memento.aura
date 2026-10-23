@@ -1,0 +1,58 @@
+// =============================================================================
+// Patrón de Diseño 18: Memento (Recuerdo / Instantánea)
+// Categoría: Comportamiento
+// =============================================================================
+
+export type CanvasMemento = {
+  snapshotData: String,
+  layerCount: Int
+};
+
+export interface Canvas {
+  draw(element: String): Unit;
+  createMemento(): CanvasMemento;
+  restore(m: CanvasMemento): Unit;
+  getState(): String;
+}
+
+export fn createCanvas(): Canvas => {
+  let mut buffer = "";
+  let mut layers = 0;
+
+  {
+    draw: (element: String): Unit => {
+      buffer = buffer + "[" + element + "]";
+      layers = layers + 1;
+    },
+    createMemento: (): CanvasMemento => ({ snapshotData: buffer, layerCount: layers }),
+    restore: (m: CanvasMemento): Unit => {
+      buffer = m.snapshotData;
+      layers = m.layerCount;
+    },
+    getState: (): String => `Capas: ${layers} | Contenido: "${buffer}"`
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  18. Patrón Memento");
+  println("==================================================");
+
+  let canvas = createCanvas();
+  canvas.draw("Círculo");
+  canvas.draw("Rectángulo");
+  println(`Estado 1: ${canvas.getState()}`);
+
+  let checkpoint = canvas.createMemento();
+
+  canvas.draw("Filtro Sepia");
+  canvas.draw("Texto Superpuesto");
+  println(`Estado 2 (tras cambios): ${canvas.getState()}`);
+
+  println("Restaurando al checkpoint previo...");
+  canvas.restore(checkpoint);
+  println(`Estado Restaurado: ${canvas.getState()}`);
+
+  println("✓ Patrón 18 finalizado con éxito.
+");
+};

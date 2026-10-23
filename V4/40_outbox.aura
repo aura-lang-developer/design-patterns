@@ -1,0 +1,63 @@
+// =============================================================================
+// Patrón de Diseño 40: Transactional Outbox (Bandeja de Salida Transaccional)
+// Categoría: Arquitectónico
+// =============================================================================
+
+export type OutboxMessage = {
+  id: Int,
+  topic: String,
+  payload: String,
+  sent: Bool
+};
+
+export interface OutboxStore {
+  saveRecordAndEvent(record: String, eventPayload: String): Unit;
+  dispatchPendingEvents(): List<String>;
+}
+
+export fn createOutboxStore(): OutboxStore => {
+  let mut dbTable: List<String> = [];
+  let mut outbox: List<OutboxMessage> = [];
+  let mut seq = 1;
+
+  {
+    saveRecordAndEvent: (record: String, eventPayload: String): Unit => {
+      let mut newDb = dbTable;
+      newDb.push(record);
+      dbTable = newDb;
+
+      let mut newOut = outbox;
+      newOut.push({ id: seq, topic: "UserEvents", payload: eventPayload, sent: false });
+      outbox = newOut;
+
+      seq = seq + 1;
+      println(`  [DB Transaction] Registro y Outbox guardados atómicamente: "${record}"`);
+    },
+    dispatchPendingEvents: (): List<String> => {
+      let mut logs: List<String> = [];
+      for msg in outbox {
+        if (!msg.sent) {
+          logs.push(`Despachado a Kafka [${msg.topic}]: ${msg.payload}`);
+        }
+      }
+      logs
+    }
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  40. Patrón Transactional Outbox");
+  println("==================================================");
+
+  let store = createOutboxStore();
+  store.saveRecordAndEvent("INSERT INTO users VALUES ('Andrea')", "event: UserRegistered, name: Andrea");
+
+  let sent = store.dispatchPendingEvents();
+  for s in sent {
+    println(`  -> ${s}`);
+  }
+
+  println("✓ Patrón 40 finalizado con éxito.
+");
+};

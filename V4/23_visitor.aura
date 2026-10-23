@@ -1,0 +1,47 @@
+// =============================================================================
+// Patrón de Diseño 23: Visitor (Visitante)
+// Categoría: Comportamiento
+// =============================================================================
+
+export type Shape =
+  | Circle { radius: Float }
+  | Rectangle { width: Float, height: Float };
+
+export interface ShapeVisitor {
+  visitCircle(radius: Float): String;
+  visitRectangle(width: Float, height: Float): String;
+}
+
+export fn accept(shape: Shape, visitor: ShapeVisitor): String => {
+  match shape {
+    Circle { radius } => visitor.visitCircle(radius),
+    Rectangle { width, height } => visitor.visitRectangle(width, height)
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  23. Patrón Visitor");
+  println("==================================================");
+
+  let areaCalculator: ShapeVisitor = {
+    visitCircle: (r: Float): String => `Área Círculo: ${3.14159 * r * r}`,
+    visitRectangle: (w: Float, h: Float): String => `Área Rectángulo: ${w * h}`
+  };
+
+  let xmlSerializer: ShapeVisitor = {
+    visitCircle: (r: Float): String => `<circle radius="${r}"/>`,
+    visitRectangle: (w: Float, h: Float): String => `<rectangle w="${w}" h="${h}"/>`
+  };
+
+  let c = Shape.Circle({ radius: 5.0 });
+  let r = Shape.Rectangle({ width: 4.0, height: 6.0 });
+
+  println(accept(c, areaCalculator));
+  println(accept(r, areaCalculator));
+  println(accept(c, xmlSerializer));
+  println(accept(r, xmlSerializer));
+
+  println("✓ Patrón 23 finalizado con éxito.
+");
+};

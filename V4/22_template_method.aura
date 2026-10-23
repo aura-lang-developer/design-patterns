@@ -1,0 +1,37 @@
+// =============================================================================
+// Patrón de Diseño 22: Template Method (Método Plantilla)
+// Categoría: Comportamiento
+// =============================================================================
+
+export interface PipelineHooks {
+  extractData(): String;
+  transformData(raw: String): String;
+  loadData(transformed: String): Unit;
+}
+
+export fn runETLPipeline(name: String, hooks: PipelineHooks): Unit => {
+  println(`▶ Iniciando Pipeline ETL: "${name}"`);
+  let raw = hooks.extractData();
+  println(`  [Extracción completada]: ${raw}`);
+  let transformed = hooks.transformData(raw);
+  println(`  [Transformación aplicada]: ${transformed}`);
+  hooks.loadData(transformed);
+  println(`✓ Pipeline "${name}" finalizado.`);
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  22. Patrón Template Method");
+  println("==================================================");
+
+  let csvHooks: PipelineHooks = {
+    extractData: (): String => "id,nombre,salario\n1,Carlos,50000",
+    transformData: (raw: String): String => `[JSON: {rows: "${raw}"}]`,
+    loadData: (t: String): Unit => { println(`  -> Insertando registros en Data Warehouse: ${t}`); }
+  };
+
+  runETLPipeline("Importación Nómina CSV", csvHooks);
+
+  println("✓ Patrón 22 finalizado con éxito.
+");
+};

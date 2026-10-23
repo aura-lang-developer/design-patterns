@@ -1,0 +1,43 @@
+// =============================================================================
+// Patrón de Diseño 36: Rate Limiter (Limitador de Tasa)
+// Categoría: Resiliencia & Tráfico
+// =============================================================================
+
+export interface RateLimiter {
+  acquire(): Bool;
+}
+
+export fn createTokenBucket(capacity: Int): RateLimiter => {
+  let mut tokens = capacity;
+
+  {
+    acquire: (): Bool => {
+      if (tokens > 0) {
+        tokens = tokens - 1;
+        true
+      } else {
+        false
+      }
+    }
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  36. Patrón Rate Limiter");
+  println("==================================================");
+
+  let limiter = createTokenBucket(3);
+  let requests: List<Int> = [1, 2, 3, 4, 5];
+
+  for i in requests {
+    if (limiter.acquire()) {
+      println(`  Petición #${i}: Aceptada y procesada [200 OK]`);
+    } else {
+      println(`  Petición #${i}: Rechazada por exceso de tasa [429 Too Many Requests]`);
+    }
+  }
+
+  println("✓ Patrón 36 finalizado con éxito.
+");
+};

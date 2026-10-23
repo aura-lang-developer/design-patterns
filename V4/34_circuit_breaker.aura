@@ -1,0 +1,74 @@
+// =============================================================================
+// Patrón de Diseño 34: Circuit Breaker (Interruptor de Circuito)
+// Categoría: Resiliencia
+// =============================================================================
+
+export type BreakerState =
+  | Closed
+  | Open
+  | HalfOpen;
+
+export interface RemoteCaller {
+  call(): Result<String, String>;
+}
+
+export interface CircuitBreaker {
+  execute(caller: RemoteCaller): Result<String, String>;
+  getState(): String;
+}
+
+export fn createCircuitBreaker(failureThreshold: Int): CircuitBreaker => {
+  let mut failures = 0;
+  let mut state = BreakerState.Closed;
+
+  {
+    execute: (caller: RemoteCaller): Result<String, String> => {
+      match state {
+        Open => Err("CircuitBreaker OPEN: Petición rechazada inmediatamente para proteger el sistema"),
+        _ => {
+          let outcome = caller.call();
+          match outcome {
+            Ok(v) => {
+              failures = 0;
+              state = BreakerState.Closed;
+              Ok(v)
+            },
+            Err(e) => {
+              failures = failures + 1;
+              if (failures >= failureThreshold) {
+                state = BreakerState.Open;
+              }
+              Err(e)
+            }
+          }
+        }
+      }
+    },
+    getState: (): String => {
+      match state {
+        Closed => "CLOSED",
+        Open => "OPEN",
+        HalfOpen => "HALF_OPEN"
+      }
+    }
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  34. Patrón Circuit Breaker");
+  println("==================================================");
+
+  let breaker = createCircuitBreaker(2);
+
+  let failingCall: RemoteCaller = {
+    call: (): Result<String, String> => Err("Fallo en servicio de pagos externo")
+  };
+
+  println(`Intento 1: ${breaker.execute(failingCall)} (Estado: ${breaker.getState()})`);
+  println(`Intento 2: ${breaker.execute(failingCall)} (Estado: ${breaker.getState()})`);
+  println(`Intento 3 (Fast Fail): ${breaker.execute(failingCall)} (Estado: ${breaker.getState()})`);
+
+  println("✓ Patrón 34 finalizado con éxito.
+");
+};

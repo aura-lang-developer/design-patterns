@@ -1,0 +1,51 @@
+// =============================================================================
+// Patrón de Diseño 48: Service Locator (Localizador de Servicios)
+// Categoría: Sistemas & Arquitectura
+// =============================================================================
+
+export interface CacheService {
+  get(k: String): String;
+}
+
+export interface ServiceLocator {
+  registerCache(svc: CacheService): Unit;
+  getCache(): CacheService;
+}
+
+export fn createLocator(): ServiceLocator => {
+  let mut cacheInstance: Option<CacheService> = None;
+
+  {
+    registerCache: (svc: CacheService): Unit => {
+      cacheInstance = Some(svc);
+    },
+    getCache: (): CacheService => {
+      match cacheInstance {
+        Some(s) => s,
+        None => {
+          get: (k: String): String => `[Fallback] Clave: ${k}`
+        }
+      }
+    }
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  48. Patrón Service Locator");
+  println("==================================================");
+
+  let locator = createLocator();
+
+  let redisMock: CacheService = {
+    get: (k: String): String => `RedisMockValue("${k}")`
+  };
+
+  locator.registerCache(redisMock);
+
+  let cache = locator.getCache();
+  println(`Dato recuperado mediante Locator: ${cache.get("session_token_xyz")}`);
+
+  println("✓ Patrón 48 finalizado con éxito.
+");
+};

@@ -1,0 +1,43 @@
+// =============================================================================
+// Patrón de Diseño 14: Command (Comando con Deshacer)
+// Categoría: Comportamiento
+// =============================================================================
+
+export type Editor = {
+  text: String
+};
+
+export interface Command {
+  execute(ed: Editor): Editor;
+  undo(ed: Editor): Editor;
+}
+
+export fn makeAppendCommand(extra: String, prevText: String): Command => {
+  {
+    execute: (ed: Editor): Editor => ({ text: ed.text + extra }),
+    undo: (_ed: Editor): Editor => ({ text: prevText })
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  14. Patrón Command");
+  println("==================================================");
+
+  let mut editor: Editor = { text: "Inicio" };
+  println(`Texto inicial: "${editor.text}"`);
+
+  let c1 = makeAppendCommand(" -> Primer Cambio", editor.text);
+  editor = c1.execute(editor);
+  println(`Tras Comando 1: "${editor.text}"`);
+
+  let c2 = makeAppendCommand(" -> Segundo Cambio", editor.text);
+  editor = c2.execute(editor);
+  println(`Tras Comando 2: "${editor.text}"`);
+
+  editor = c2.undo(editor);
+  println(`Tras Deshacer (Undo 2): "${editor.text}"`);
+
+  println("✓ Patrón 14 finalizado con éxito.
+");
+};

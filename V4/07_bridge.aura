@@ -1,0 +1,79 @@
+// =============================================================================
+// Patrón de Diseño 07: Bridge (Puente)
+// Categoría: Estructural
+// =============================================================================
+
+export interface Device {
+  isEnabled(): Bool;
+  enable(): Unit;
+  disable(): Unit;
+  setVolume(percent: Int): Unit;
+  getVolume(): Int;
+}
+
+export fn createTvDevice(): Device => {
+  let mut on = false;
+  let mut vol = 20;
+  {
+    isEnabled: (): Bool => on,
+    enable: (): Unit => { on = true; },
+    disable: (): Unit => { on = false; },
+    setVolume: (percent: Int): Unit => { vol = percent; },
+    getVolume: (): Int => vol
+  }
+};
+
+export fn createRadioDevice(): Device => {
+  let mut on = false;
+  let mut vol = 10;
+  {
+    isEnabled: (): Bool => on,
+    enable: (): Unit => { on = true; },
+    disable: (): Unit => { on = false; },
+    setVolume: (percent: Int): Unit => { vol = percent; },
+    getVolume: (): Int => vol
+  }
+};
+
+export interface RemoteControl {
+  togglePower(): String;
+  volumeUp(): String;
+}
+
+export fn createRemote(dev: Device): RemoteControl => {
+  {
+    togglePower: (): String => {
+      if (dev.isEnabled()) {
+        dev.disable();
+        "Dispositivo apagado"
+      } else {
+        dev.enable();
+        "Dispositivo encendido"
+      }
+    },
+    volumeUp: (): String => {
+      let nextVol = dev.getVolume() + 5;
+      dev.setVolume(nextVol);
+      `Volumen ajustado a ${nextVol}%`
+    }
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  07. Patrón Bridge");
+  println("==================================================");
+
+  let tv = createTvDevice();
+  let remoteTv = createRemote(tv);
+  println(`[TV Remote] ${remoteTv.togglePower()}`);
+  println(`[TV Remote] ${remoteTv.volumeUp()}`);
+
+  let radio = createRadioDevice();
+  let remoteRadio = createRemote(radio);
+  println(`[Radio Remote] ${remoteRadio.togglePower()}`);
+  println(`[Radio Remote] ${remoteRadio.volumeUp()}`);
+
+  println("✓ Patrón 07 finalizado con éxito.
+");
+};

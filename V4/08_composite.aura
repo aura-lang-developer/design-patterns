@@ -1,0 +1,65 @@
+// =============================================================================
+// Patrón de Diseño 08: Composite (Objeto Compuesto / Árbol Recursivo)
+// Categoría: Estructural
+// =============================================================================
+
+export type FileSystemItem =
+  | File { name: String, sizeBytes: Int }
+  | Directory { name: String, children: List<FileSystemItem> };
+
+export fn calculateTotalSize(item: FileSystemItem): Int => {
+  match item {
+    File { name: _, sizeBytes } => sizeBytes,
+    Directory { name: _, children } => {
+      let mut total = 0;
+      for child in children {
+        total = total + calculateTotalSize(child);
+      }
+      total
+    }
+  }
+};
+
+export fn printStructure(item: FileSystemItem, indent: String): Unit => {
+  match item {
+    File { name, sizeBytes } => {
+      println(`${indent}📄 ${name} (${sizeBytes} bytes)`);
+    },
+    Directory { name, children } => {
+      println(`${indent}📁 [${name}]`);
+      for child in children {
+        printStructure(child, indent + "   ");
+      }
+    }
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  08. Patrón Composite");
+  println("==================================================");
+
+  let doc1 = FileSystemItem.File({ name: "informe.pdf", sizeBytes: 1540 });
+  let doc2 = FileSystemItem.File({ name: "balance.xlsx", sizeBytes: 2890 });
+  let code = FileSystemItem.File({ name: "main.aura", sizeBytes: 740 });
+
+  let srcChildren: List<FileSystemItem> = [code];
+  let docsChildren: List<FileSystemItem> = [doc1, doc2];
+
+  let srcDir = FileSystemItem.Directory({ name: "src", children: srcChildren });
+  let docsDir = FileSystemItem.Directory({ name: "docs", children: docsChildren });
+
+  let rootChildren: List<FileSystemItem> = [srcDir, docsDir];
+  let root = FileSystemItem.Directory({
+    name: "project_root",
+    children: rootChildren
+  });
+
+  printStructure(root, "");
+  let totalBytes = calculateTotalSize(root);
+  println(`
+Tamaño total del sistema de archivos: ${totalBytes} bytes`);
+
+  println("✓ Patrón 08 finalizado con éxito.
+");
+};

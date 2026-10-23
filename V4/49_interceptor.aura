@@ -1,0 +1,59 @@
+// =============================================================================
+// Patrón de Diseño 49: Interceptor (Cadena de Interceptores / Filtros)
+// Categoría: Sistemas
+// =============================================================================
+
+export type HttpContext = {
+  path: String,
+  elapsedMs: Int,
+  authorized: Bool
+};
+
+export interface ContextFilter {
+  apply(ctx: HttpContext): HttpContext;
+}
+
+export fn createLoggingFilter(): ContextFilter => ({
+  apply: (ctx: HttpContext): HttpContext => {
+    println(`  [Interceptor: Log] Solicitud entrante para ruta: ${ctx.path}`);
+    ctx
+  }
+});
+
+export fn createAuthFilter(): ContextFilter => ({
+  apply: (ctx: HttpContext): HttpContext => {
+    println("  [Interceptor: Auth] Validando credenciales de acceso...");
+    { ...ctx, authorized: true }
+  }
+});
+
+export fn createTimingFilter(): ContextFilter => ({
+  apply: (ctx: HttpContext): HttpContext => {
+    println("  [Interceptor: Timing] Cronometrando ejecución...");
+    { ...ctx, elapsedMs: 12 }
+  }
+});
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  49. Patrón Interceptor");
+  println("==================================================");
+
+  let initialContext: HttpContext = {
+    path: "/api/v1/metrics",
+    elapsedMs: 0,
+    authorized: false
+  };
+
+  let fLog = createLoggingFilter();
+  let fAuth = createAuthFilter();
+  let fTime = createTimingFilter();
+
+  let c1 = fLog.apply(initialContext);
+  let c2 = fAuth.apply(c1);
+  let finalContext = fTime.apply(c2);
+
+  println(`Contexto final procesado: Auth=${finalContext.authorized}, Duración=${finalContext.elapsedMs}ms`);
+  println("✓ Patrón 49 finalizado con éxito.
+");
+};

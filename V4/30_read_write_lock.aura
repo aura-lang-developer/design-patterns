@@ -1,0 +1,36 @@
+// =============================================================================
+// Patrón de Diseño 30: Read-Write Lock (Bloqueo Lectura/Escritura)
+// Categoría: Concurrencia
+// =============================================================================
+
+export interface SharedDataStore {
+  readData(): String;
+  writeData(newVal: String): Unit;
+}
+
+export fn createStore(initial: String): SharedDataStore => {
+  let mut data = initial;
+  {
+    readData: (): String => data,
+    writeData: (newVal: String): Unit => {
+      data = newVal;
+    }
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  30. Patrón Read-Write Lock");
+  println("==================================================");
+
+  let store = createStore("Versión 1.0.0");
+  println(`Lectura 1: ${store.readData()}`);
+  println(`Lectura 2: ${store.readData()}`);
+
+  println("Aplicando escritura exclusiva...");
+  store.writeData("Versión 2.0.0-PROD");
+
+  println(`Lectura 3: ${store.readData()}`);
+  println("✓ Patrón 30 finalizado con éxito.
+");
+};

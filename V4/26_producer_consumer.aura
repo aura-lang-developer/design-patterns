@@ -1,0 +1,45 @@
+// =============================================================================
+// Patrón de Diseño 26: Producer-Consumer (Productor-Consumidor)
+// Categoría: Concurrencia
+// =============================================================================
+
+export fn producer(queue: Channel<String>): Unit => {
+  let items: List<String> = ["Log #1", "Log #2", "Log #3", "Log #4"];
+  for it in items {
+    println(`  [Productor] Creando y enviando "${it}"`);
+    let _ = queue <- it;
+  }
+  Channel.close(queue);
+};
+
+export fn consumer(queue: Channel<String>, done: Channel<Bool>): Unit => {
+  while (true) {
+    let msg = <-queue;
+    match msg {
+      Some(item) => println(`  [Consumidor] Ingestando y guardando "${item}" en disco`),
+      None => break
+    }
+  }
+  let _ = done <- true;
+};
+
+export async fn main(): Task<Unit, String> => {
+  println("==================================================");
+  println("  26. Patrón Producer-Consumer");
+  println("==================================================");
+
+  let queue: Channel<String> = Channel.make(2);
+  let done: Channel<Bool> = Channel.make(1);
+
+  spawn producer(queue);
+  spawn consumer(queue, done);
+
+  let finished = <-done;
+  match finished {
+    Some(_) => println("  Todos los items fueron procesados."),
+    None => ()
+  }
+
+  println("✓ Patrón 26 finalizado con éxito.
+");
+};

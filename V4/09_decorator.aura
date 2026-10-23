@@ -1,0 +1,53 @@
+// =============================================================================
+// Patrón de Diseño 09: Decorator (Decorador)
+// Categoría: Estructural
+// =============================================================================
+
+export interface TextFormatter {
+  format(input: String): String;
+}
+
+export fn createPlainText(): TextFormatter => {
+  {
+    format: (input: String): String => input
+  }
+};
+
+export fn decorateBold(base: TextFormatter): TextFormatter => {
+  {
+    format: (input: String): String => `<b>${base.format(input)}</b>`
+  }
+};
+
+export fn decorateItalic(base: TextFormatter): TextFormatter => {
+  {
+    format: (input: String): String => `<i>${base.format(input)}</i>`
+  }
+};
+
+export fn decorateUpper(base: TextFormatter): TextFormatter => {
+  {
+    format: (input: String): String => `[UPPER] ${base.format(input)}`
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  09. Patrón Decorator");
+  println("==================================================");
+
+  let raw = createPlainText();
+  println(`Simple: ${raw.format("Hola Aura")}`);
+
+  let bold = decorateBold(raw);
+  println(`Negrita: ${bold.format("Hola Aura")}`);
+
+  let boldItalic = decorateItalic(bold);
+  println(`Negrita + Cursiva: ${boldItalic.format("Hola Aura")}`);
+
+  let fullyDecorated = decorateUpper(boldItalic);
+  println(`Decorador Completo: ${fullyDecorated.format("Hola Aura")}`);
+
+  println("✓ Patrón 09 finalizado con éxito.
+");
+};

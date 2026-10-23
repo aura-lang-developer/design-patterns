@@ -1,0 +1,44 @@
+// =============================================================================
+// Patrón de Diseño 21: Strategy (Estrategia)
+// Categoría: Comportamiento
+// =============================================================================
+
+export interface TaxStrategy {
+  calculate(subtotal: Float): Float;
+}
+
+export fn createEUTax(): TaxStrategy => ({
+  calculate: (s: Float): Float => s * 0.21
+});
+
+export fn createUSATax(): TaxStrategy => ({
+  calculate: (s: Float): Float => s * 0.08
+});
+
+export fn createZeroTax(): TaxStrategy => ({
+  calculate: (s: Float): Float => 0.0
+});
+
+export fn computeOrderTotal(subtotal: Float, strategy: TaxStrategy): Float => {
+  let tax = strategy.calculate(subtotal);
+  subtotal + tax
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  21. Patrón Strategy");
+  println("==================================================");
+
+  let amount = 100.0;
+  let eu = createEUTax();
+  let usa = createUSATax();
+  let free = createZeroTax();
+
+  println(`Subtotal: $${amount}`);
+  println(`Total con IVA Europeo (21%): $${computeOrderTotal(amount, eu)}`);
+  println(`Total con Tax USA (8%): $${computeOrderTotal(amount, usa)}`);
+  println(`Total Zona Libre de Impuestos: $${computeOrderTotal(amount, free)}`);
+
+  println("✓ Patrón 21 finalizado con éxito.
+");
+};

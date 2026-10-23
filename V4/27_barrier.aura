@@ -1,0 +1,31 @@
+// =============================================================================
+// Patrón de Diseño 27: Barrier (Barrera de Sincronización)
+// Categoría: Concurrencia
+// =============================================================================
+
+export fn workerTask(id: Int, barrierCh: Channel<Int>): Unit => {
+  println(`  [Tarea ${id}] Fase de preparación completada`);
+  let _ = barrierCh <- id;
+};
+
+export async fn main(): Task<Unit, String> => {
+  println("==================================================");
+  println("  27. Patrón Barrier");
+  println("==================================================");
+
+  let totalWorkers = 4;
+  let barrier: Channel<Int> = Channel.make(totalWorkers);
+
+  let workerIds: List<Int> = [1, 2, 3, 4];
+  for i in workerIds {
+    spawn workerTask(i, barrier);
+  }
+
+  for _ in workerIds {
+    let _ = <-barrier;
+  }
+
+  println("🚀 ¡Todos los trabajadores alcanzaron la barrera! Continuando ejecución colectiva.");
+  println("✓ Patrón 27 finalizado con éxito.
+");
+};

@@ -1,0 +1,62 @@
+// =============================================================================
+// Patrón de Diseño 50: Plugin System (Sistema de Extensiones)
+// Categoría: Extensibilidad & Arquitectura
+// =============================================================================
+
+export interface Plugin {
+  name(): String;
+  onStartup(): String;
+}
+
+export interface PluginHost {
+  register(p: Plugin): Unit;
+  startAll(): List<String>;
+}
+
+export fn createPluginHost(): PluginHost => {
+  let mut plugins: List<Plugin> = [];
+
+  {
+    register: (p: Plugin): Unit => {
+      let mut updated: List<Plugin> = plugins;
+      updated.push(p);
+      plugins = updated;
+    },
+    startAll: (): List<String> => {
+      let mut out: List<String> = [];
+      for p in plugins {
+        out.push(`Plugin "${p.name()}" cargado: ${p.onStartup()}`);
+      }
+      out
+    }
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  50. Patrón Plugin System");
+  println("==================================================");
+
+  let host = createPluginHost();
+
+  let analyticsPlugin: Plugin = {
+    name: (): String => "GoogleAnalyticsExtension",
+    onStartup: (): String => "Conectado al dashboard de analíticas en tiempo real"
+  };
+
+  let securityPlugin: Plugin = {
+    name: (): String => "SecurityFirewallPlugin",
+    onStartup: (): String => "Reglas WAF cargadas e inspeccionando tráfico"
+  };
+
+  host.register(analyticsPlugin);
+  host.register(securityPlugin);
+
+  let startupLogs = host.startAll();
+  for log in startupLogs {
+    println(`  -> ${log}`);
+  }
+
+  println("✓ Patrón 50 finalizado con éxito.
+");
+};

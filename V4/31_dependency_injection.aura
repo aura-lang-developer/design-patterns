@@ -1,0 +1,47 @@
+// =============================================================================
+// Patrón de Diseño 31: Dependency Injection (Inyección de Dependencias)
+// Categoría: Arquitectónico
+// =============================================================================
+
+export interface Logger {
+  log(msg: String): Unit;
+}
+
+export interface UserRepository {
+  findUser(id: Int): String;
+}
+
+export interface UserService {
+  getUserDetails(id: Int): String;
+}
+
+export fn createUserService(logger: Logger, repo: UserRepository): UserService => {
+  {
+    getUserDetails: (id: Int): String => {
+      logger.log(`Consultando usuario con id=${id}`);
+      let user = repo.findUser(id);
+      `Usuario Encontrado: ${user}`
+    }
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  31. Patrón Dependency Injection");
+  println("==================================================");
+
+  let consoleLogger: Logger = {
+    log: (msg: String): Unit => { println(`  [LOGGER] ${msg}`); }
+  };
+
+  let mockRepo: UserRepository = {
+    findUser: (id: Int): String => `Persona(id=${id}, nombre="Mavro Developer")`
+  };
+
+  let service = createUserService(consoleLogger, mockRepo);
+  let res = service.getUserDetails(42);
+  println(res);
+
+  println("✓ Patrón 31 finalizado con éxito.
+");
+};

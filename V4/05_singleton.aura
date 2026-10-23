@@ -1,0 +1,51 @@
+// =============================================================================
+// Patrón de Diseño 05: Singleton (Instancia Única Concurrente con Once)
+// Categoría: Creacional
+// =============================================================================
+
+export type AppConfig = {
+  appName: String,
+  version: String,
+  environment: String
+};
+
+let once = Once.new();
+let mut instance: Option<AppConfig> = None;
+
+export fn getAppConfig(): AppConfig => {
+  once.do(() => {
+    println("⚙️ Inicializando recurso global AppConfig (solo una vez)...");
+    instance = Some({
+      appName: "AuraEnterpriseEngine",
+      version: "4.2.0",
+      environment: "production"
+    });
+  });
+
+  match instance {
+    Some(cfg) => cfg,
+    None => {
+      appName: "Default",
+      version: "0.0.0",
+      environment: "test"
+    }
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  05. Patrón Singleton Concurrente");
+  println("==================================================");
+
+  let c1 = getAppConfig();
+  println(`Llamada 1 -> App: ${c1.appName} v${c1.version} (${c1.environment})`);
+
+  let c2 = getAppConfig();
+  println(`Llamada 2 -> App: ${c2.appName} v${c2.version} (${c2.environment})`);
+
+  let c3 = getAppConfig();
+  println(`Llamada 3 -> App: ${c3.appName} v${c3.version} (${c3.environment})`);
+
+  println("✓ Patrón 05 finalizado con éxito.
+");
+};

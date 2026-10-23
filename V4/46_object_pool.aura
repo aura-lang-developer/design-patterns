@@ -1,0 +1,45 @@
+// =============================================================================
+// Patrón de Diseño 46: Object Pool (Reserva de Recursos / Conexiones)
+// Categoría: Rendimiento & Recursos
+// =============================================================================
+
+export type PooledResource = {
+  id: Int,
+  tag: String
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  46. Patrón Object Pool");
+  println("==================================================");
+
+  let mut seq = 0;
+  let pool = Pool.new(() => {
+    seq = seq + 1;
+    println(`  [Pool Factory] Generando nueva instancia en memoria #${seq}`);
+    {
+      id: seq,
+      tag: "Buffer-DMA"
+    }
+  });
+
+  println("Obteniendo recurso 1...");
+  let r1 = pool.get();
+  println(`Obtenido: ID #${r1.id}`);
+
+  println("Obteniendo recurso 2...");
+  let r2 = pool.get();
+  println(`Obtenido: ID #${r2.id}`);
+
+  println("Devolviendo recurso 1 al pool...");
+  pool.put(r1);
+
+  println("Obteniendo siguiente recurso (debe ser reciclado del pool)...");
+  let recycled = pool.get();
+  println(`Obtenido: ID #${recycled.id} (Reciclado: ${recycled.id == r1.id})`);
+
+  pool.put(r2);
+  pool.put(recycled);
+  println("✓ Patrón 46 finalizado con éxito.
+");
+};

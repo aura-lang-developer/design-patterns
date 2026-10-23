@@ -1,0 +1,43 @@
+// =============================================================================
+// Patrón de Diseño 16: Iterator (Iterador)
+// Categoría: Comportamiento
+// =============================================================================
+
+export interface IntIterator {
+  hasNext(): Bool;
+  next(): Option<Int>;
+}
+
+export fn makeRangeIterator(start: Int, end: Int): IntIterator => {
+  let mut current = start;
+  {
+    hasNext: (): Bool => current <= end,
+    next: (): Option<Int> => {
+      if (current <= end) {
+        let val = current;
+        current = current + 1;
+        Some(val)
+      } else {
+        None
+      }
+    }
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  16. Patrón Iterator");
+  println("==================================================");
+
+  let iter = makeRangeIterator(10, 15);
+  println("Iterando secuencialmente:");
+  while (iter.hasNext()) {
+    match iter.next() {
+      Some(v) => println(`  Valor iterado: ${v}`),
+      None => ()
+    }
+  }
+
+  println("✓ Patrón 16 finalizado con éxito.
+");
+};

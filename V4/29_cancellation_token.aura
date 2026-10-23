@@ -1,0 +1,54 @@
+// =============================================================================
+// Patrón de Diseño 29: Cancellation Token (Token de Cancelación)
+// Categoría: Concurrencia
+// =============================================================================
+
+export interface CancellationToken {
+  isCancelled(): Bool;
+  cancel(): Unit;
+}
+
+export fn newCancellationToken(): CancellationToken => {
+  let mut cancelled = false;
+
+  {
+    isCancelled: (): Bool => cancelled,
+    cancel: (): Unit => {
+      cancelled = true;
+    }
+  }
+};
+
+export fn cancellableLoop(token: CancellationToken, finishCh: Channel<String>): Unit => {
+  let mut iterations = 0;
+  while (true) {
+    if (token.isCancelled()) {
+      finishCh <- `Tarea cancelada limpiamente tras ${iterations} iteraciones`;
+      break;
+    }
+    iterations = iterations + 1;
+  }
+};
+
+export async fn main(): Task<Unit, String> => {
+  println("==================================================");
+  println("  29. Patrón Cancellation Token");
+  println("==================================================");
+
+  let token = newCancellationToken();
+  let done: Channel<String> = Channel.make(1);
+
+  spawn cancellableLoop(token, done);
+
+  println("Solicitando cancelación inmediata...");
+  token.cancel();
+
+  let msg = <-done;
+  match msg {
+    Some(text) => println(`  -> ${text}`),
+    None => ()
+  }
+
+  println("✓ Patrón 29 finalizado con éxito.
+");
+};

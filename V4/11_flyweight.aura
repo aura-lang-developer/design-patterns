@@ -1,0 +1,51 @@
+// =============================================================================
+// Patrón de Diseño 11: Flyweight (Peso Ligero)
+// Categoría: Estructural
+// =============================================================================
+
+export type TreeType = {
+  name: String,
+  color: String,
+  texture: String
+};
+
+export type Tree = {
+  x: Int,
+  y: Int,
+  treeType: TreeType
+};
+
+export fn renderTree(tree: Tree): String =>
+  `Árbol [${tree.treeType.name}] en (${tree.x}, ${tree.y}) con textura "${tree.treeType.texture}" y color ${tree.treeType.color}`;
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  11. Patrón Flyweight");
+  println("==================================================");
+
+  let pinoType: TreeType = {
+    name: "Pino Nórdico",
+    color: "#0F4D0F",
+    texture: "pine_leaf_4k.dds"
+  };
+
+  let robleType: TreeType = {
+    name: "Roble Centenario",
+    color: "#2C5E1A",
+    texture: "oak_bark_4k.dds"
+  };
+
+  let forest: List<Tree> = [
+    { x: 10, y: 20, treeType: pinoType },
+    { x: 15, y: 25, treeType: pinoType },
+    { x: 40, y: 80, treeType: robleType },
+    { x: 45, y: 90, treeType: robleType }
+  ];
+
+  for t in forest {
+    println(renderTree(t));
+  }
+
+  println("✓ Patrón 11 finalizado con éxito.
+");
+};

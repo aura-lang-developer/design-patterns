@@ -1,0 +1,24 @@
+// =============================================================================
+// Patrón de Diseño 47: RAII / Defer Cleanup (Limpieza Determinista LIFO)
+// Categoría: Sistemas
+// =============================================================================
+
+export fn simulateFileProcessing(fileName: String): Unit => {
+  println(`[1] Abriendo descriptor de archivo: "${fileName}"`);
+  defer println(`[4] 🧹 DEFER: Descriptor de archivo "${fileName}" cerrado limpiamente.`);
+
+  println("[2] Bloqueando mutex de escritura...");
+  defer println("[3] 🧹 DEFER: Mutex liberado.");
+
+  println("    Procesando bytes de datos de forma segura...");
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  47. Patrón RAII / Defer Cleanup");
+  println("==================================================");
+
+  simulateFileProcessing("access.log");
+  println("✓ Patrón 47 finalizado con éxito.
+");
+};

@@ -1,0 +1,68 @@
+// =============================================================================
+// Patrón de Diseño 38: CQRS (Command Query Responsibility Segregation)
+// Categoría: Arquitectónico
+// =============================================================================
+
+export type UserProfileView = {
+  userId: Int,
+  bio: String
+};
+
+export interface CommandService {
+  updateUserBio(userId: Int, newBio: String): Unit;
+}
+
+export interface QueryService {
+  getUserProfile(userId: Int): Option<UserProfileView>;
+}
+
+export type CQRSModule = {
+  cmd: CommandService,
+  qry: QueryService
+};
+
+export fn createCQRSModule(): CQRSModule => {
+  let mut readView: Option<UserProfileView> = Some({ userId: 1, bio: "Biografía Inicial" });
+
+  let cmdService: CommandService = {
+    updateUserBio: (userId: Int, newBio: String): Unit => {
+      println(`  [Command Handler] Validando reglas y actualizando biografía de usuario ${userId}`);
+      readView = Some({ userId: userId, bio: newBio });
+    }
+  };
+
+  let qryService: QueryService = {
+    getUserProfile: (userId: Int): Option<UserProfileView> => {
+      println(`  [Query Handler] Leyendo vista desnormalizada rápida para ${userId}`);
+      readView
+    }
+  };
+
+  {
+    cmd: cmdService,
+    qry: qryService
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  38. Patrón CQRS");
+  println("==================================================");
+
+  let cqrs = createCQRSModule();
+
+  match cqrs.qry.getUserProfile(1) {
+    Some(v) => println(`Lectura previa: "${v.bio}"`),
+    None => ()
+  };
+
+  cqrs.cmd.updateUserBio(1, "Ingeniero de Software especializado en Aura Lang");
+
+  match cqrs.qry.getUserProfile(1) {
+    Some(v) => println(`Lectura posterior: "${v.bio}"`),
+    None => ()
+  };
+
+  println("✓ Patrón 38 finalizado con éxito.
+");
+};

@@ -1,0 +1,58 @@
+// =============================================================================
+// Patrón de Diseño 20: State (Estado / FSM Exhaustiva)
+// Categoría: Comportamiento
+// =============================================================================
+
+export type OrderState =
+  | PendingPayment
+  | Paid
+  | Shipped
+  | Cancelled;
+
+export type Order = {
+  id: String,
+  state: OrderState
+};
+
+export fn cancelOrder(order: Order): Result<Order, String> => {
+  match order.state {
+    PendingPayment => Ok({ ...order, state: OrderState.Cancelled }),
+    Paid => Ok({ ...order, state: OrderState.Cancelled }),
+    Shipped => Err("No se puede cancelar una orden que ya fue enviada"),
+    Cancelled => Err("La orden ya se encuentra cancelada")
+  }
+};
+
+export fn shipOrder(order: Order): Result<Order, String> => {
+  match order.state {
+    Paid => Ok({ ...order, state: OrderState.Shipped }),
+    PendingPayment => Err("No se puede enviar una orden que no ha sido pagada"),
+    Shipped => Err("La orden ya fue despachada"),
+    Cancelled => Err("No se puede enviar una orden cancelada")
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  20. Patrón State");
+  println("==================================================");
+
+  let mut ord: Order = { id: "ORD-9912", state: OrderState.Paid };
+  println(`Orden inicial: ${ord.id} en estado Pagada`);
+
+  match shipOrder(ord) {
+    Ok(updated) => {
+      ord = updated;
+      println("Éxito al despachar la orden.");
+    },
+    Err(e) => println(`Error: ${e}`)
+  };
+
+  match cancelOrder(ord) {
+    Ok(_) => println("Cancelada"),
+    Err(e) => println(`Transición rechazada por el Estado actual: "${e}"`)
+  };
+
+  println("✓ Patrón 20 finalizado con éxito.
+");
+};

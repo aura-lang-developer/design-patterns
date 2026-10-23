@@ -1,0 +1,50 @@
+// =============================================================================
+// Patrón de Diseño 25: Pipeline (Tubería Concurrente de Procesamiento)
+// Categoría: Concurrencia
+// =============================================================================
+
+export async fn stageGenerator(outChan: Channel<Int>): Task<Unit, String> => {
+  let items: List<Int> = [1, 2, 3, 4, 5];
+  for i in items {
+    let _ = outChan <- i;
+  }
+  Channel.close(outChan);
+};
+
+export async fn stageMultiplier(inChan: Channel<Int>, outChan: Channel<Int>): Task<Unit, String> => {
+  while (true) {
+    let msg = <-inChan;
+    match msg {
+      Some(v) => {
+        let _ = outChan <- (v * 10);
+        ()
+      },
+      None => break
+    }
+  }
+  Channel.close(outChan);
+};
+
+export async fn main(): Task<Unit, String> => {
+  println("==================================================");
+  println("  25. Patrón Pipeline Concurrente");
+  println("==================================================");
+
+  let c1: Channel<Int> = Channel.make(5);
+  let c2: Channel<Int> = Channel.make(5);
+
+  spawn stageGenerator(c1);
+  spawn stageMultiplier(c1, c2);
+
+  println("Consumiendo salida del Pipeline en etapa final:");
+  while (true) {
+    let msg = <-c2;
+    match msg {
+      Some(outVal) => println(`  Etapa Final -> Recibido: ${outVal}`),
+      None => break
+    }
+  }
+
+  println("✓ Patrón 25 finalizado con éxito.
+");
+};

@@ -1,0 +1,55 @@
+// =============================================================================
+// Patrón de Diseño 02: Abstract Factory (Fábrica Abstracta)
+// Categoría: Creacional
+// =============================================================================
+
+export interface Button {
+  render(): String;
+}
+
+export interface Dialog {
+  show(): String;
+}
+
+export interface GUIFactory {
+  createButton(): Button;
+  createDialog(): Dialog;
+}
+
+export fn createDarkThemeFactory(): GUIFactory => {
+  {
+    createButton: (): Button => ({ render: (): String => "[Dark Theme] Renderizando botón negro con texto blanco" }),
+    createDialog: (): Dialog => ({ show: (): String => "[Dark Theme] Mostrando modal con fondo gris oscuro y bordes redondeados" })
+  }
+};
+
+export fn createLightThemeFactory(): GUIFactory => {
+  {
+    createButton: (): Button => ({ render: (): String => "[Light Theme] Renderizando botón blanco con sombra azul" }),
+    createDialog: (): Dialog => ({ show: (): String => "[Light Theme] Mostrando modal con fondo blanco y tipografía negra" })
+  }
+};
+
+export fn renderWindow(factory: GUIFactory): Unit => {
+  let btn = factory.createButton();
+  let dlg = factory.createDialog();
+  println(btn.render());
+  println(dlg.show());
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  02. Patrón Abstract Factory");
+  println("==================================================");
+
+  println("--- Tema Oscuro ---");
+  let dark = createDarkThemeFactory();
+  renderWindow(dark);
+
+  println("--- Tema Claro ---");
+  let light = createLightThemeFactory();
+  renderWindow(light);
+
+  println("✓ Patrón 02 finalizado con éxito.
+");
+};

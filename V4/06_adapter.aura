@@ -1,0 +1,58 @@
+// =============================================================================
+// Patrón de Diseño 06: Adapter (Adaptador)
+// Categoría: Estructural
+// =============================================================================
+
+export interface PaymentProcessor {
+  pay(amountUsd: Float): String;
+}
+
+export interface LegacyPaypalService {
+  executeTransaction(cents: Int): String;
+}
+
+export interface CryptoGateway {
+  sendSatoshis(sats: Int, token: String): String;
+}
+
+export fn adaptPaypal(service: LegacyPaypalService): PaymentProcessor => {
+  {
+    pay: (amountUsd: Float): String => {
+      let cents = 4999;
+      let res = service.executeTransaction(cents);
+      `Adaptador Paypal: ${res}`
+    }
+  }
+};
+
+export fn adaptCrypto(gateway: CryptoGateway): PaymentProcessor => {
+  {
+    pay: (amountUsd: Float): String => {
+      let sats = 300000;
+      let res = gateway.sendSatoshis(sats, "BTC");
+      `Adaptador Crypto: ${res}`
+    }
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  06. Patrón Adapter");
+  println("==================================================");
+
+  let legacyPaypal: LegacyPaypalService = {
+    executeTransaction: (cents: Int): String => `PayPal cobró ${cents} centavos con éxito`
+  };
+
+  let cryptoGate: CryptoGateway = {
+    sendSatoshis: (sats: Int, token: String): String => `Blockchain transmitió ${sats} ${token}`
+  };
+
+  let p1: PaymentProcessor = adaptPaypal(legacyPaypal);
+  let p2: PaymentProcessor = adaptCrypto(cryptoGate);
+
+  println(p1.pay(49.99));
+  println(p2.pay(150.00));
+  println("✓ Patrón 06 finalizado con éxito.
+");
+};

@@ -1,0 +1,58 @@
+// =============================================================================
+// Patrón de Diseño 24: Worker Pool (Pool de Trabajadores Concurrentes CSP)
+// Categoría: Concurrencia
+// =============================================================================
+
+export fn workerLoop(id: Int, jobs: Channel<Int>, results: Channel<Int>, wg: WaitGroup): Unit => {
+  while (true) {
+    let msg = <-jobs;
+    match msg {
+      Some(job) => {
+        println(`  [Worker ${id}] Procesando tarea #${job}`);
+        let _ = results <- (job * job);
+        ()
+      },
+      None => {
+        wg.done();
+        break;
+      }
+    }
+  }
+};
+
+export async fn main(): Task<Unit, String> => {
+  println("==================================================");
+  println("  24. Patrón Worker Pool");
+  println("==================================================");
+
+  let jobs: Channel<Int> = Channel.make(10);
+  let results: Channel<Int> = Channel.make(10);
+  let wg = WaitGroup.new();
+
+  wg.add(3);
+  spawn workerLoop(1, jobs, results, wg);
+  spawn workerLoop(2, jobs, results, wg);
+  spawn workerLoop(3, jobs, results, wg);
+
+  let taskList: List<Int> = [1, 2, 3, 4, 5];
+  for i in taskList {
+    jobs <- i;
+  }
+  Channel.close(jobs);
+
+  spawn {
+    await wg.wait();
+    Channel.close(results);
+  };
+
+  while (true) {
+    let res = <-results;
+    match res {
+      Some(v) => println(`  [Resultado] Cuadrado calculado: ${v}`),
+      None => break
+    }
+  }
+
+  println("✓ Patrón 24 finalizado con éxito.
+");
+};

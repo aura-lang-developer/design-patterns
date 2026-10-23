@@ -1,0 +1,50 @@
+// =============================================================================
+// Patrón de Diseño 04: Prototype (Prototipo / Clonación)
+// Categoría: Creacional
+// =============================================================================
+
+export type Monster = {
+  name: String,
+  hp: Int,
+  attack: Int,
+  element: String
+};
+
+export interface Cloner {
+  cloneWithChanges(extraHp: Int, newName: String): Monster;
+}
+
+export fn makeMonster(base: Monster): Cloner => {
+  {
+    cloneWithChanges: (extraHp: Int, newName: String): Monster => {
+      {
+        ...base,
+        name: newName,
+        hp: base.hp + extraHp
+      }
+    }
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  04. Patrón Prototype");
+  println("==================================================");
+
+  let goblinBase: Monster = {
+    name: "Goblin Común",
+    hp: 50,
+    attack: 12,
+    element: "Tierra"
+  };
+
+  let cloner = makeMonster(goblinBase);
+  let eliteGoblin = cloner.cloneWithChanges(150, "Goblin Jefe");
+  let shamanGoblin = cloner.cloneWithChanges(50, "Goblin Chamán");
+
+  println(`Base: ${goblinBase.name} | HP: ${goblinBase.hp} | Elemento: ${goblinBase.element}`);
+  println(`Clon 1: ${eliteGoblin.name} | HP: ${eliteGoblin.hp} | Elemento: ${eliteGoblin.element}`);
+  println(`Clon 2: ${shamanGoblin.name} | HP: ${shamanGoblin.hp} | Elemento: ${shamanGoblin.element}`);
+  println("✓ Patrón 04 finalizado con éxito.
+");
+};

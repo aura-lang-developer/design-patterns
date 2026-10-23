@@ -1,0 +1,61 @@
+// =============================================================================
+// Patrón de Diseño 03: Builder (Constructor Inmutable Fluido)
+// Categoría: Creacional
+// =============================================================================
+
+export type ServerConfig = {
+  host: String,
+  port: Int,
+  tls: Bool,
+  timeoutMs: Int,
+  maxConnections: Int
+};
+
+export interface ServerConfigBuilder {
+  setHost(h: String): ServerConfigBuilder;
+  setPort(p: Int): ServerConfigBuilder;
+  enableTLS(t: Bool): ServerConfigBuilder;
+  setTimeout(ms: Int): ServerConfigBuilder;
+  setMaxConnections(c: Int): ServerConfigBuilder;
+  build(): ServerConfig;
+}
+
+export fn newServerConfigBuilder(cfg: ServerConfig): ServerConfigBuilder => {
+  {
+    setHost: (h: String): ServerConfigBuilder => newServerConfigBuilder({ ...cfg, host: h }),
+    setPort: (p: Int): ServerConfigBuilder => newServerConfigBuilder({ ...cfg, port: p }),
+    enableTLS: (t: Bool): ServerConfigBuilder => newServerConfigBuilder({ ...cfg, tls: t }),
+    setTimeout: (ms: Int): ServerConfigBuilder => newServerConfigBuilder({ ...cfg, timeoutMs: ms }),
+    setMaxConnections: (c: Int): ServerConfigBuilder => newServerConfigBuilder({ ...cfg, maxConnections: c }),
+    build: (): ServerConfig => cfg
+  }
+};
+
+export fn defaultConfig(): ServerConfig => {
+  {
+    host: "127.0.0.1",
+    port: 8080,
+    tls: false,
+    timeoutMs: 3000,
+    maxConnections: 100
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  03. Patrón Builder");
+  println("==================================================");
+
+  let builder = newServerConfigBuilder(defaultConfig());
+  let srv = builder
+    .setHost("api.produccion.cloud")
+    .setPort(443)
+    .enableTLS(true)
+    .setTimeout(5000)
+    .setMaxConnections(10000)
+    .build();
+
+  println(`Servidor configurado en ${srv.host}:${srv.port} | TLS=${srv.tls} | Timeout=${srv.timeoutMs}ms | MaxConn=${srv.maxConnections}`);
+  println("✓ Patrón 03 finalizado con éxito.
+");
+};

@@ -1,0 +1,51 @@
+// =============================================================================
+// Patrón de Diseño 37: Event Sourcing (Origen de Eventos)
+// Categoría: Arquitectónico
+// =============================================================================
+
+export type BankEvent =
+  | AccountCreated { id: String, owner: String }
+  | Deposited { amount: Float }
+  | Withdrawn { amount: Float };
+
+export type BankAccount = {
+  id: String,
+  owner: String,
+  balance: Float
+};
+
+export fn applyEvent(acc: BankAccount, event: BankEvent): BankAccount => {
+  match event {
+    AccountCreated { id, owner } => { id: id, owner: owner, balance: 0.0 },
+    Deposited { amount } => { ...acc, balance: acc.balance + amount },
+    Withdrawn { amount } => { ...acc, balance: acc.balance - amount }
+  }
+};
+
+export fn replayEvents(events: List<BankEvent>): BankAccount => {
+  let mut state: BankAccount = { id: "", owner: "", balance: 0.0 };
+  for e in events {
+    state = applyEvent(state, e);
+  }
+  state
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  37. Patrón Event Sourcing");
+  println("==================================================");
+
+  let history: List<BankEvent> = [
+    BankEvent.AccountCreated({ id: "ACC-771", owner: "Lucía Méndez" }),
+    BankEvent.Deposited({ amount: 1500.0 }),
+    BankEvent.Withdrawn({ amount: 350.0 }),
+    BankEvent.Deposited({ amount: 200.0 })
+  ];
+
+  let currentAccount = replayEvents(history);
+  println(`Cuenta: ${currentAccount.id} de ${currentAccount.owner}`);
+  println(`Balance calculado por reproducción de eventos: $${currentAccount.balance}`);
+
+  println("✓ Patrón 37 finalizado con éxito.
+");
+};

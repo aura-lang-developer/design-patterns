@@ -1,0 +1,64 @@
+// =============================================================================
+// Patrón de Diseño 13: Chain of Responsibility (Cadena de Responsabilidad)
+// Categoría: Comportamiento
+// =============================================================================
+
+export type Request = {
+  token: String,
+  role: String,
+  body: String
+};
+
+export interface Handler {
+  handle(req: Request): Result<String, String>;
+}
+
+export fn makeAuthHandler(next: Option<Handler>): Handler => {
+  {
+    handle: (req: Request): Result<String, String> => {
+      if (req.token != "valid_token_123") {
+        Err("Autenticación fallida: Token inválido")
+      } else {
+        match next {
+          Some(h) => h.handle(req),
+          None => Ok("Autenticado (Fin de cadena)")
+        }
+      }
+    }
+  }
+};
+
+export fn makeRoleHandler(requiredRole: String, next: Option<Handler>): Handler => {
+  {
+    handle: (req: Request): Result<String, String> => {
+      if (req.role != requiredRole) {
+        Err(`Autorización fallida: Requiere rol ${requiredRole}`)
+      } else {
+        match next {
+          Some(h) => h.handle(req),
+          None => Ok("Rol verificado con éxito")
+        }
+      }
+    }
+  }
+};
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  13. Patrón Chain of Responsibility");
+  println("==================================================");
+
+  let roleStep = makeRoleHandler("ADMIN", None);
+  let chain = makeAuthHandler(Some(roleStep));
+
+  let reqBadAuth: Request = { token: "bad", role: "ADMIN", body: "{}" };
+  let reqBadRole: Request = { token: "valid_token_123", role: "GUEST", body: "{}" };
+  let reqValid: Request = { token: "valid_token_123", role: "ADMIN", body: "action: reboot" };
+
+  println(`Petición 1: ${chain.handle(reqBadAuth)}`);
+  println(`Petición 2: ${chain.handle(reqBadRole)}`);
+  println(`Petición 3: ${chain.handle(reqValid)}`);
+
+  println("✓ Patrón 13 finalizado con éxito.
+");
+};

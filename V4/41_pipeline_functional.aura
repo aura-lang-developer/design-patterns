@@ -1,0 +1,29 @@
+// =============================================================================
+// Patrón de Diseño 41: Functional Pipeline (Tubería Funcional con |>)
+// Categoría: Funcional
+// =============================================================================
+
+export fn trimSpaces(s: String): String => s.trim();
+
+export fn toUpperText(s: String): String => s.toUpperCase();
+
+export fn prefixNotice(s: String): String => `[AVISO OFICIAL] ${s}`;
+
+export fn main(): Unit => {
+  println("==================================================");
+  println("  41. Patrón Functional Pipeline");
+  println("==================================================");
+
+  let raw = "   mantenimiento programado a las 22:00 hrs   ";
+
+  let formatted = raw
+    |> trimSpaces
+    |> toUpperText
+    |> prefixNotice;
+
+  println(`Entrada original: "${raw}"`);
+  println(`Resultado Pipeline: "${formatted}"`);
+
+  println("✓ Patrón 41 finalizado con éxito.
+");
+};
